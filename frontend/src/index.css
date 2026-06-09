@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    @apply h-full;
+  }
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+    font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system,
+      'Segoe UI', sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1.5
+      text-sm font-medium text-white shadow-sm transition-colors
+      hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 rounded-md border border-gray-300
+      bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm
+      transition-colors hover:bg-gray-50 disabled:cursor-not-allowed
+      disabled:opacity-50;
+  }
+  .card {
+    @apply rounded-lg border border-gray-200 bg-white shadow-sm;
+  }
+}
