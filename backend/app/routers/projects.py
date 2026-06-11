@@ -105,28 +105,35 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
     """删除项目（硬删）。
 
     行为：
-      1. 删除数据库记录（items / files / settlement_logs 走 ORM cascade）
-      2. 删除磁盘目录 projects/<id>/ 下的所有 25 个子文件夹 + 临时文件
-      3. 删除磁盘目录 projects/<id>/final/ 下的结算书 PDF
+      1. 删除磁盘目录 projects/<id>/ 下的所有 25 个子文件夹 + 临时文件
+      2. 删除数据库记录（items / files / settlement_logs 走 ORM cascade）
 
     注意：删除是**不可逆**的。前端在调用此接口前必须做二次确认。
+
+    修 C3 (REVIEW-TRACK2 C3)：之前顺序是"先 DB 后磁盘"，
+    导致 Windows 上 PDF 文件被句柄锁住时 rmtree 失败但 DB 已删，
+    出现"204 成功 + 磁盘孤儿永久留尸"。改为先删磁盘，失败则返回 500，
+    DB 记录保持可重试。
     """
     p = db.query(Project).filter(Project.id == project_id).first()
     if not p:
         raise HTTPException(404, "项目不存在")
 
-    # 1. 删 DB 记录（cascading 自动删 items / files / settlement_logs）
-    db.delete(p)
-    db.commit()
-
-    # 2. 删磁盘项目目录
+    # 1. 先删磁盘项目目录（失败 → 500，DB 记录保持，重试有效）
     project_dir = safe_join(settings.PROJECTS_DIR, project_id)
     if project_dir.exists() and project_dir.is_dir():
         try:
             shutil.rmtree(project_dir)
         except OSError as e:
-            # 磁盘清理失败不阻塞 DB 删成功的响应，但记到日志
             import logging
-            logging.getLogger("app").warning(
-                "删除项目目录失败: %s → %s", project_dir, e,
+            logging.getLogger("app").error(
+                "删除项目目录失败: %s → %s（DB 记录保持，可重试）", project_dir, e,
             )
+            raise HTTPException(
+                500,
+                f"删除项目目录失败（文件可能正在被其他程序占用）：{e}",
+            )
+
+    # 2. 删 DB 记录（cascading 自动删 items / files / settlement_logs）
+    db.delete(p)
+    db.commit()

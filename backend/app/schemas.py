@@ -22,7 +22,16 @@ class ProjectCreate(BaseModel):
     @field_validator("deadline")
     @classmethod
     def deadline_must_be_future(cls, v: date, info):
-        if "handover_date" in info.data and info.data["handover_date"] and v < info.data["handover_date"]:
+        # 修 C-status (REVIEW-TRACK2 C2 / REVIEW-TRACK3 C-status)：
+        # 之前函数名撒谎——只校验 ≥ handover_date，从不跟今天比，
+        # 接受 2020 年的项目。现在补上"不可早于今天"的硬校验。
+        if v < date.today():
+            raise ValueError("截止日期不可早于今天")
+        if (
+            "handover_date" in info.data
+            and info.data["handover_date"]
+            and v < info.data["handover_date"]
+        ):
             raise ValueError("截止日期不可早于移交日期")
         return v
 
@@ -100,6 +109,10 @@ class ItemResponse(BaseModel):
     confirmed_at: Optional[datetime]
     is_extension: bool
     files: List[FileInItem] = []
+    # 修 C1 (REVIEW-TRACK1 C1)：新增项时是否可推广到全局模版。
+    # 仅 add_item 端点会返回 true，其他端点（list/get/confirm）固定为 false。
+    # 之前 routers/items.py:70 用 dict 强塞，前端契约失效；现在写入 schema。
+    promote_available: bool = False
 
     class Config:
         from_attributes = True

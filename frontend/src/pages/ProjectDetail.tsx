@@ -9,11 +9,9 @@
  *路由：/projects/:id（CONTEXT-04 §4）
  *依赖：useItems（拉资料项 + 未认领文件）+ useProjectDeadline + 项目元信息（fetch）
  */
-import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { useState } from 'react';
 import { Archive } from 'lucide-react';
-import { apiClient } from '../api/client';
 import { useProjectDeadline } from '../hooks/useDeadlineStatus';
 import {
  useConfirmItem,
@@ -21,7 +19,7 @@ import {
  useRejectItem,
  useResetItem,
 } from '../hooks/useItems';
-import { useArchiveProject } from '@/hooks/useProjects';
+import { useArchiveProject, useProject } from '@/hooks/useProjects';
 import { ItemRow } from '../components/ItemRow';
 import { StatusBadge } from '../components/StatusBadge';
 import { UnclaimedFiles } from '../components/UnclaimedFiles';
@@ -380,22 +378,12 @@ function countByStatus(items: { status: string }[]) {
 }
 
 /**
- *拉项目元信息（与 items轮询错开5s，避免双倍流量）。
- * 这里没有直接依赖 T-FE-A 的 useProjects hook，而是自己写一个轻量包装，
- * 保证 T-FE-B 能独立 build（如果T-FE-A 的 hook还没就绪也能跑）。
+ * 修 I-key (REVIEW-TRACK1 I2 / REVIEW-TRACK3 I-key)：
+ * 之前 ProjectDetail 自定义 useProject 用 ['project', id]，
+ * 与 useProjects.ts 里的 projectKeys.byId(id) 不匹配，
+ * 导致 mutations invalidate 一个 key、轮询用另一个 key，
+ * 出现"mutation 成功但 UI 不刷"的最坏情况。
+ * 现在统一使用 useProjects.ts 里的 useProject + projectKeys.byId。
  */
-function useProject(id: string) {
- return useQuery<Project>({
- queryKey: ['project', id],
- queryFn: async () => {
- const { data } = await apiClient.get<Project>(`/projects/${encodeURIComponent(id)}`);
- return data;
- },
- refetchInterval:5000,
- refetchIntervalInBackground: false,
- staleTime:2000,
- enabled: !!id,
- });
-}
 
 export default ProjectDetail;

@@ -21,11 +21,17 @@
  *   - 截止日期 ≥ 今天
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, Link, useLocation } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, AlertCircle } from 'lucide-react'
+import { ArrowLeft, ArrowRight, AlertCircle, History } from 'lucide-react'
 
 import { emptyToNull } from '@/lib/format'
+import {
+  loadDraft,
+  saveDraft,
+  clearDraft,
+  type ProjectDraft,
+} from '@/lib/project-draft'
 import type { ProjectBasicInfo } from '@/types'
 
 interface FormState {
@@ -58,28 +64,76 @@ function defaultForm(): FormState {
   }
 }
 
+function basicToForm(b: ProjectBasicInfo): FormState {
+  return {
+    name: b.name,
+    handover_date: b.handover_date ?? '',
+    deadline: b.deadline,
+    construction_unit: b.construction_unit ?? '',
+    handover_person: b.handover_person ?? '',
+    receiving_unit: b.receiving_unit ?? '',
+    receiving_person: b.receiving_person ?? '',
+  }
+}
+
+function formToBasic(f: FormState): ProjectBasicInfo {
+  return {
+    name: f.name.trim(),
+    handover_date: f.handover_date || null,
+    deadline: f.deadline,
+    construction_unit: emptyToNull(f.construction_unit),
+    handover_person: emptyToNull(f.handover_person),
+    receiving_unit: emptyToNull(f.receiving_unit),
+    receiving_person: emptyToNull(f.receiving_person),
+  }
+}
+
+function formatRelative(timestamp: number): string {
+  const diff = Date.now() - timestamp
+  const min = Math.floor(diff / 60_000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min} 分钟前`
+  const hour = Math.floor(min / 60)
+  if (hour < 24) return `${hour} 小时前`
+  return `${Math.floor(hour / 24)} 天前`
+}
+
 export default function ProjectNew() {
   const navigate = useNavigate()
   const location = useLocation()
   const incoming = (location.state as ProjectBasicInfo | null) ?? null
 
+  // 修 I-state (REVIEW-TRACK2 M5 / REVIEW-TRACK3 I-state)：
+  // 之前表单 state 走 location.state 传第 2 步，刷新即丢。
+  // 现在：进页面时先读 sessionStorage 草稿，有就回填（比 location.state 优先级低，
+  // 因为 location.state 是用户刚点"上一步"回来的实数据，更新）。
+  const [draft, setDraft] = useState<ProjectDraft | null>(() => loadDraft())
+  const [showDraftBanner, setShowDraftBanner] = useState(false)
+
   const [form, setForm] = useState<FormState>(() => {
-    if (incoming) {
-      return {
-        name: incoming.name,
-        handover_date: incoming.handover_date ?? '',
-        deadline: incoming.deadline,
-        construction_unit: incoming.construction_unit ?? '',
-        handover_person: incoming.handover_person ?? '',
-        receiving_unit: incoming.receiving_unit ?? '',
-        receiving_person: incoming.receiving_person ?? '',
-      }
-    }
+    if (incoming) return basicToForm(incoming)
+    if (draft?.basic) return draft.basic
     return defaultForm()
   })
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>(
     {},
   )
+
+  // 检测是否有可恢复草稿（且不是用户刚"上一步"回来的）
+  useEffect(() => {
+    if (incoming) return
+    if (draft?.basic && (draft.basic.name.trim() || draft.basic.deadline)) {
+      setShowDraftBanner(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 任何 form 变化都写 sessionStorage（debounce 简化：直接 set）
+  useEffect(() => {
+    // 只有在 form 非空时存（避免空 form 覆盖有意义的草稿）
+    if (!form.name.trim() && !form.deadline) return
+    saveDraft(form)
+  }, [form])
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -89,6 +143,14 @@ export default function ProjectNew() {
       delete next[key]
       return next
     })
+  }
+
+  // 用户主动选择"丢弃草稿"
+  const handleDiscardDraft = () => {
+    clearDraft()
+    setDraft(null)
+    setShowDraftBanner(false)
+    setForm(defaultForm())
   }
 
   function validate(): boolean {
@@ -114,16 +176,7 @@ export default function ProjectNew() {
   function handleNext(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!validate()) return
-
-    const basic: ProjectBasicInfo = {
-      name: form.name.trim(),
-      handover_date: form.handover_date || null,
-      deadline: form.deadline,
-      construction_unit: emptyToNull(form.construction_unit),
-      handover_person: emptyToNull(form.handover_person),
-      receiving_unit: emptyToNull(form.receiving_unit),
-      receiving_person: emptyToNull(form.receiving_person),
-    }
+    const basic = formToBasic(form)
     navigate('/projects/new/template', { state: basic })
   }
 
@@ -160,6 +213,27 @@ export default function ProjectNew() {
           </li>
         </ol>
       </header>
+
+      {/* 草稿恢复横幅（修 I-state） */}
+      {showDraftBanner && draft && (
+        <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <History className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="flex-1">
+            <div className="font-medium">检测到未完成的草稿</div>
+            <div className="mt-0.5 text-xs text-amber-700">
+              上次填写于 {formatRelative(draft.savedAt)}，已自动恢复。
+              如果想从头开始，点击右侧「丢弃草稿」。
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleDiscardDraft}
+            className="rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-700 hover:bg-amber-100"
+          >
+            丢弃草稿
+          </button>
+        </div>
+      )}
 
       {/* ============ Form ============ */}
       <form onSubmit={handleNext} className="card space-y-5 p-6" noValidate>

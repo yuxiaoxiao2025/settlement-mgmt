@@ -79,12 +79,14 @@ def test_create_project_full(client, settings):
 
 
 def test_create_project_deadline_in_past(client):
-    """deadline 早于今天：pydantic v2 返回 422 (validation error)。"""
+    """deadline 早于今天：必须 422（修 REVIEW-TRACK2 C2：之前函数名撒谎接受 2020 年的项目）。"""
     payload = _payload(deadline=(date.today() - timedelta(days=1)).isoformat())
     r = client.post("/api/projects", json=payload)
-    # pydantic v2 缺 "future" 约束时只校验 "deadline >= handover_date"，但不强制 future
-    # 若 schema 接受过去日期则返回 201；否则 422。本测试只确保不 500
-    assert r.status_code in (201, 422), r.text
+    assert r.status_code == 422, r.text
+    # detail 里能找到"截止日期不可早于今天"
+    body = r.json()
+    detail_str = str(body)
+    assert "不可早于今天" in detail_str or "today" in detail_str.lower()
 
 
 def test_create_project_missing_required_fields(client):

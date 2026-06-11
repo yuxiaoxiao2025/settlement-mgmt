@@ -122,8 +122,19 @@ def promote_to_template(name: str, description: Optional[str] = None) -> dict:
     """把新增项写入 master_template.json（模版成长）。"""
     template_items = get_or_load_template_items()
     folder_name = _sanitize_name(name)
+    # 读出现有 version（必须读，因为写盘前 data["version"] 才是真实的）
+    with open(settings.TEMPLATE_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    current_version = data.get("version", 1)
+    current_total = len(data["items"])
+
+    # 已存在 → 不重复添加；返回的 new_version 反映当前版本（前端 toast 不变）
     if any(_sanitize_name(t["name"]) == folder_name for t in template_items):
-        return {"added": False, "version": 0, "total_items": len(template_items)}
+        return {
+            "added": False,
+            "new_version": current_version,
+            "total_items": current_total,
+        }
 
     next_seq = max((t["seq"] for t in template_items), default=0) + 1
     template_items.append({
@@ -134,10 +145,12 @@ def promote_to_template(name: str, description: Optional[str] = None) -> dict:
         "folder_name": folder_name,
     })
 
-    with open(settings.TEMPLATE_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
     data["items"] = template_items
-    data["version"] = data.get("version", 1) + 1
+    data["version"] = current_version + 1
     with open(settings.TEMPLATE_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    return {"added": True, "version": data["version"], "total_items": len(template_items)}
+    return {
+        "added": True,
+        "new_version": data["version"],
+        "total_items": len(template_items),
+    }

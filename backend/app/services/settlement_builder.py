@@ -18,45 +18,127 @@ from app.core.paths import safe_join
 from app.models import Project, Item, File, SettlementLog
 
 
-# 中文字体：正文宋体（SimSun），标题黑体（SimHei）
-# Windows 系统字体；非 Windows 平台回退到内置 STSong-Light
+# 中文字体注册（修 C-font, REVIEW-TRACK3 C-font）
+#
+# 之前 Linux 路径写死 wqy-microhei.ttc（文泉驿），与 dockerfile 装的
+# fonts-noto-cjk（思源黑体）路径 /usr/share/fonts/opentype/noto/ 完全错配，
+# 导致容器内 fallback 到 STSong-Light（CID 字体）+ 标题用 Helvetica-Bold（英文），
+# 实际 PDF 中文字符乱码 / 豆腐块。
+#
+# 修复：探测多路径，找到任一可用的 CJK 字体就注册；
+# 全部失败时显式 raise（invariant：NotoCJK + WQY + STSong-Light 三者全失败
+# 必须报错，不静默走 Helvetica）。
+import sys  # noqa: E402  (moved to top for clarity)
+
+# Linux/macOS 候选路径（按优先级排序，找到第一个就用）
+LINUX_CANDIDATES_BODY = [
+    # arphic 明体（宋体替身，用户要求"正文宋体"，报告 lab 兼容 TrueType）
+    "/usr/share/fonts/truetype/arphic/uming.ttc",
+    # 思源黑体（OpenType，reportlab 4.x 报"postscript outlines not supported"，列为兜底）
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    # 文泉驿微米黑
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    # macOS
+    "/System/Library/Fonts/PingFang.ttc",
+    "/Library/Fonts/Songti.ttc",
+]
+
+LINUX_CANDIDATES_HEADING = [
+    # arphic 楷黑（黑体替身，用户要求"标题黑体"）
+    "/usr/share/fonts/truetype/arphic/ukai.ttc",
+    # 思源黑体粗体
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    # 文泉驿微米黑
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    # macOS 黑体
+    "/System/Library/Fonts/STHeiti Medium.ttc",
+]
+
+WINDOWS_CANDIDATES_BODY = [
+    ("SimSun", r"C:\Windows\Fonts\simsun.ttc"),
+    ("SimSun", r"C:\Windows\Fonts\simfang.ttf"),  # fallback
+]
+WINDOWS_CANDIDATES_HEADING = [
+    ("SimHei", r"C:\Windows\Fonts\simhei.ttf"),
+    ("SimHei", r"C:\Windows\Fonts\simkai.ttf"),  # fallback
+]
+
+
 def _register_cn_fonts() -> tuple[str, str]:
-    """注册中文字体，返回 (body_font, heading_font)。"""
+    """注册中文字体，返回 (body_font_name, heading_font_name)。
+
+    探测顺序：Windows 原生 → Linux 多个候选 → reportlab 内置 CID 字体。
+    invariant：所有路径全失败时 raise（不静默 fallback）。
+    """
+    body_font = ""
+    heading_font = ""
+
     if sys.platform.startswith("win"):
-        candidates = [
-            ("SimSun", r"C:\Windows\Fonts\simsun.ttc"),
-            ("SimHei", r"C:\Windows\Fonts\simhei.ttf"),
-        ]
+        for name, path in WINDOWS_CANDIDATES_BODY:
+            if Path(path).exists():
+                _try_register(name, path, target="body")
+                body_font = name
+                break
+        for name, path in WINDOWS_CANDIDATES_HEADING:
+            if Path(path).exists():
+                _try_register(name, path, target="heading")
+                heading_font = name
+                break
     else:
-        # Linux/macOS: 尝试常见路径
-        candidates = [
-            ("SimSun", "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
-            ("SimHei", "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
-        ]
-    body_font = "Helvetica"
-    heading_font = "Helvetica-Bold"
-    for name, path in candidates:
-        if Path(path).exists():
-            try:
-                pdfmetrics.registerFont(TTFont(name, path))
-                if name == "SimSun":
-                    body_font = "SimSun"
-                elif name == "SimHei":
-                    heading_font = "SimHei"
-            except Exception as e:
-                print(f"[FONT] 注册 {name} 失败: {e}")
-    # 如果 SimSun 注册失败，回退到 reportlab 内置 CID 字体
-    if body_font == "Helvetica":
+        # Linux / macOS：探测多个候选路径
+        for path in LINUX_CANDIDATES_BODY:
+            if Path(path).exists():
+                # 用文件名（去掉扩展）作为字体名
+                name = Path(path).stem.replace(" ", "_")
+                if _try_register(name, path, target="body"):
+                    body_font = name
+                    break
+        for path in LINUX_CANDIDATES_HEADING:
+            if Path(path).exists():
+                name = Path(path).stem.replace(" ", "_")
+                if _try_register(name, path, target="heading"):
+                    heading_font = name
+                    break
+
+    # 兜底：reportlab 内置 CID 字体（最后手段）
+    if not body_font:
         try:
             from reportlab.pdfbase.cidfonts import UnicodeCIDFont
             pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
             body_font = "STSong-Light"
-        except Exception:
-            pass
+            print("[FONT] 兜底用 STSong-Light（CID 字体）")
+        except Exception as e:
+            print(f"[FONT-FATAL] STSong-Light 兜底失败: {e}")
+
+    if not heading_font:
+        # heading 没找到时复用 body（避免空字符串 → reportlab 报错）
+        heading_font = body_font or "Helvetica-Bold"
+        if not body_font:
+            print(f"[FONT-FATAL] heading 兜底用 {heading_font}")
+
+    # invariant：body 必须非空
+    if not body_font:
+        raise RuntimeError(
+            "[FONT-FATAL] 没有任何可用的中文字体（已探测 Windows/Linux/macOS 多路径 + "
+            "reportlab 内置 CID 兜底，全部失败）。"
+            "请安装 fonts-noto-cjk 或确认系统字体路径。"
+        )
+
     return body_font, heading_font
 
 
-import sys  # noqa: E402
+def _try_register(name: str, path: str, target: str) -> bool:
+    """注册一个 TTF/TTC/OTF 文件为 reportlab 字体。成功返回 True。"""
+    try:
+        pdfmetrics.registerFont(TTFont(name, path))
+        print(f"[FONT] {target} 字体已注册: {name} ← {path}")
+        return True
+    except Exception as e:
+        print(f"[FONT-WARN] {target} 注册 {name} ({path}) 失败: {e}")
+        return False
+
 
 CHINESE_FONT, HEADING_FONT = _register_cn_fonts()
 print(f"[FONT] 结算书字体：正文={CHINESE_FONT}, 标题={HEADING_FONT}")

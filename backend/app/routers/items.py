@@ -15,6 +15,9 @@ router = APIRouter(tags=["items"])
 
 
 def _to_response(item: Item) -> ItemResponse:
+    # 修 C1 (REVIEW-TRACK1 C1)：promote_available 从 item.promote_available 拿
+    # （add_item 路由临时挂的属性；其他路由默认 False）
+    promote_available = getattr(item, "promote_available", False)
     return ItemResponse(
         id=item.id,
         seq=item.seq,
@@ -36,6 +39,7 @@ def _to_response(item: Item) -> ItemResponse:
             )
             for f in item.files
         ],
+        promote_available=promote_available,
     )
 
 
@@ -66,9 +70,11 @@ def add_item(project_id: str, payload: ItemCreate, db: Session = Depends(get_db)
     item, promote_available = item_service.add_item(
         db, project_id, payload.name, payload.description,
     )
-    resp = _to_response(item).model_dump()
-    resp["promote_available"] = promote_available
-    return resp
+    # 修 C1 (REVIEW-TRACK1 C1)：promote_available 字段已写进 ItemResponse schema。
+    # 这里需要把 promote_available 挂到 item 上（不是 SQL 列，只是临时属性），
+    # 让 Pydantic 序列化时能取到。
+    item.promote_available = promote_available  # type: ignore[attr-defined]
+    return _to_response(item)
 
 
 @router.patch("/api/items/{item_id}", response_model=ItemResponse)

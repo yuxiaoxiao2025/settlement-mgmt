@@ -39,6 +39,7 @@ import {
 import { useCreateProject } from '@/hooks/useProjects'
 import { addItem } from '@/api/items'
 import { getTemplate } from '@/api/template'
+import { clearDraft } from '@/lib/project-draft'
 import { useAppStore } from '@/store/app'
 import type {
   ProjectBasicInfo,
@@ -250,6 +251,8 @@ export default function ProjectNewTemplate() {
         ),
       }
       const project = await create.mutateAsync(payload)
+      // 创建成功 → 清 sessionStorage 草稿（修 I-state）
+      clearDraft()
       // 2) 加临时项（按用户勾选顺序）
       const tempIdOrder = Array.from(selectedTempIds)
       for (const tempId of tempIdOrder) {

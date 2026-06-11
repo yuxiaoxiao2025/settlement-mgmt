@@ -27,12 +27,18 @@ def _scan_projects_dir() -> list[tuple[str, str, Path]]:
     """扫描 PROJECTS_DIR，返回 [(event_type, kind, path), ...]。
 
     与 watchdog 事件格式对齐：created / modified / deleted。
+
+    跳过的目录（修 I-files，REVIEW-TRACK2 I2 / REVIEW-TRACK3 I-files）：
+    - `.pdfs/`     : WPS 转码产物，避免自循环 ingest
+    - `_unclaimed/`: 用户未归类的临时存放区
+    - `.tmp/`      : 任何临时文件
     """
     events: list[tuple[str, str, Path]] = []
     root = settings.PROJECTS_DIR
     if not root.exists():
         return events
 
+    SKIP_DIRS = {".pdfs", "_unclaimed", ".tmp"}
     current: dict[str, float] = {}
     # 递归扫描所有文件
     for p in root.rglob("*"):
@@ -40,6 +46,9 @@ def _scan_projects_dir() -> list[tuple[str, str, Path]]:
             continue
         # 跳过 meta 文件
         if p.name == "meta.json":
+            continue
+        # 跳过 SKIP_DIRS 内的文件（避免自循环 + 临时产物触发 ingest）
+        if any(part in SKIP_DIRS for part in p.parts):
             continue
         try:
             mtime = p.stat().st_mtime

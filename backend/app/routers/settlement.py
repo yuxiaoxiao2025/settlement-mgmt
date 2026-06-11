@@ -56,6 +56,11 @@ def build(
 ):
     if not db.query(Project).filter(Project.id == project_id).first():
         raise HTTPException(404, "项目不存在")
+    # 修 I-empty-build (REVIEW-TRACK2 I1 / REVIEW-TRACK3 I-empty-build)：
+    # 0 项项目不应该 build 出"仅封面+目录"的空结算书（用户容易误以为成功）。
+    item_count = db.query(Item).filter(Item.project_id == project_id).count()
+    if item_count == 0:
+        raise HTTPException(422, "项目下没有任何资料项，无法生成结算书（请先添加项）")
     preview_info = _check_readiness(db, project_id)
     if not preview_info.ready:
         raise HTTPException(409, f"未全部确认：{', '.join(preview_info.missing[:3])}...")
