@@ -318,7 +318,7 @@ function useProject(id: string) {
  return useQuery<Project>({
  queryKey: ['project', id],
  queryFn: async () => {
- const { data } = await apiClient.get<Project>(`/api/projects/${encodeURIComponent(id)}`);
+ const { data } = await apiClient.get<Project>(`/projects/${encodeURIComponent(id)}`);
  return data;
  },
  refetchInterval:5000,

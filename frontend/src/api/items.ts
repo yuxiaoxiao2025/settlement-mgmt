@@ -62,24 +62,24 @@ export interface RejectPayload {
  * 注意：响应包含 `unclaimed`，但实际归属逻辑在 ProjectDetail 里通过 ItemListResponse一起拿到。
  */
 export async function listItems(projectId: string): Promise<ItemListResponse> {
- const { data } = await apiClient.get<ItemListResponse>(
- `/api/projects/${encodeURIComponent(projectId)}/items`,
- );
- return data;
+  const { data } = await apiClient.get<ItemListResponse>(
+    `/projects/${encodeURIComponent(projectId)}/items`,
+  );
+  return data;
 }
 
 /**
  * 新增一项（项目级扩展项）。后端返回201 + ItemResponse，可能带 promote_available标志。
  */
 export async function addItem(
- projectId: string,
- payload: AddItemPayload,
+  projectId: string,
+  payload: AddItemPayload,
 ): Promise<AddItemResponse> {
- const { data } = await apiClient.post<AddItemResponse>(
- `/api/projects/${encodeURIComponent(projectId)}/items`,
- payload,
- );
- return data;
+  const { data } = await apiClient.post<AddItemResponse>(
+    `/projects/${encodeURIComponent(projectId)}/items`,
+    payload,
+  );
+  return data;
 }
 
 /**
@@ -89,19 +89,19 @@ export async function addItem(
  * 如需状态变更，必须走 confirm / reject / reset专用端点。
  */
 export async function updateItem(
- itemId: string,
- payload: UpdateItemPayload,
+  itemId: string,
+  payload: UpdateItemPayload,
 ): Promise<Item> {
- const { data } = await apiClient.patch<Item>(
- `/api/items/${encodeURIComponent(itemId)}`,
- payload,
- );
- return data;
+  const { data } = await apiClient.patch<Item>(
+    `/items/${encodeURIComponent(itemId)}`,
+    payload,
+  );
+  return data;
 }
 
 /** 删除一个项（级联文件）。 */
 export async function deleteItem(itemId: string): Promise<void> {
- await apiClient.delete(`/api/items/${encodeURIComponent(itemId)}`);
+  await apiClient.delete(`/items/${encodeURIComponent(itemId)}`);
 }
 
 /**
@@ -111,16 +111,16 @@ export async function deleteItem(itemId: string): Promise<void> {
  * @param primaryFileId 主文件 ID；不传则后端自动选第一个
  */
 export async function confirmItem(
- itemId: string,
- primaryFileId?: string | null,
+  itemId: string,
+  primaryFileId?: string | null,
 ): Promise<Item> {
- const payload: ConfirmPayload = {};
- if (primaryFileId) payload.primary_file_id = primaryFileId;
- const { data } = await apiClient.post<Item>(
- `/api/items/${encodeURIComponent(itemId)}/confirm`,
- payload,
- );
- return data;
+  const payload: ConfirmPayload = {};
+  if (primaryFileId) payload.primary_file_id = primaryFileId;
+  const { data } = await apiClient.post<Item>(
+    `/items/${encodeURIComponent(itemId)}/confirm`,
+    payload,
+  );
+  return data;
 }
 
 /**
@@ -128,11 +128,11 @@ export async function confirmItem(
  * 必须提供驳回备注。
  */
 export async function rejectItem(itemId: string, note: string): Promise<Item> {
- const { data } = await apiClient.post<Item>(
- `/api/items/${encodeURIComponent(itemId)}/reject`,
- { note },
- );
- return data;
+  const { data } = await apiClient.post<Item>(
+    `/items/${encodeURIComponent(itemId)}/reject`,
+    { note },
+  );
+  return data;
 }
 
 /**
@@ -140,10 +140,10 @@ export async function rejectItem(itemId: string, note: string): Promise<Item> {
  * 通常用于驳回后允许重新上传，或管理员强制重置。
  */
 export async function resetItem(itemId: string): Promise<Item> {
- const { data } = await apiClient.post<Item>(
- `/api/items/${encodeURIComponent(itemId)}/reset`,
- );
- return data;
+  const { data } = await apiClient.post<Item>(
+    `/items/${encodeURIComponent(itemId)}/reset`,
+  );
+  return data;
 }
 
 /** 类型守卫：合法的 ItemStatus */

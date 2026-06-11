@@ -1,5 +1,6 @@
 """结算书生成：封面 + 目录 + 合并 PDF。"""
 import io
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
@@ -24,6 +25,18 @@ try:
     CHINESE_FONT = "STSong-Light"
 except Exception:
     CHINESE_FONT = "Helvetica"
+
+
+# 每个 TOC 页能容纳的条目数（A4 / 0.6cm 行高 ≈ 38 条/页，保守取 35）
+ITEMS_PER_TOC_PAGE = 35
+
+
+def _count_item_pages(reader: PdfReader) -> int:
+    """读 PDF 页数（失败返回 0）。"""
+    try:
+        return len(reader.pages)
+    except Exception:
+        return 0
 
 
 def _draw_cover(c: canvas.Canvas, project: Project, total_pages: int) -> int:
@@ -99,6 +112,14 @@ def _draw_toc(c: canvas.Canvas, items: List[Tuple[Item, int]]) -> int:
     return 1
 
 
+def _compute_toc_pages(items: List[Item]) -> int:
+    """按条目数估算目录页数（与 _draw_toc 内部布局一致）。"""
+    if not items:
+        return 1
+    # 实际 _draw_toc 每页 = 表头 + 行(每条 0.6cm)。保守按 35 条/页。
+    return max(1, math.ceil(len(items) / ITEMS_PER_TOC_PAGE))
+
+
 def build_settlement(db: Session, project_id: str, requester_ip: str = "") -> SettlementLog:
     """生成结算书。"""
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -126,22 +147,22 @@ def build_settlement(db: Session, project_id: str, requester_ip: str = "") -> Se
     db.refresh(log)
 
     try:
-        # 1) 合并所有 primary PDF → 中间文件
-        writer = PdfWriter()
-        item_page_map: List[Tuple[Item, int]] = []
-        current_page = 2  # 封面占 1 页，目录从第 2 页开始（先占位）
+        # 1) 先估算目录页数，决定每项起始页
+        cover_pages = 1
+        toc_pages = _compute_toc_pages(items)
+        content_start = cover_pages + toc_pages + 1  # 第一个内容项的起始页
 
-        # 占位封面 + 目录（先空）
-        for _ in range(2):
-            writer.add_blank_page(width=A4[0], height=A4[1])
+        # 2) 构建内容 PDF（不带封面/目录）
+        content_writer = PdfWriter()
+        item_page_map: List[Tuple[Item, int]] = []
+        current_page = content_start
 
         for item in items:
             primary = next((f for f in item.files if f.is_primary), None)
             if not primary:
-                # 取第一个 PDF
                 primary = next((f for f in item.files if f.is_pdf), None)
             if not primary:
-                # 跳过（理论上 confirm 时已校验过）
+                # 无 PDF 文件 — 仍占位（item_page_map 里有这一项，目录会显示但合并时跳过）
                 item_page_map.append((item, current_page))
                 continue
 
@@ -151,38 +172,45 @@ def build_settlement(db: Session, project_id: str, requester_ip: str = "") -> Se
                 continue
 
             reader = PdfReader(str(pdf_path))
+            page_count = _count_item_pages(reader)
+            if page_count == 0:
+                item_page_map.append((item, current_page))
+                continue
             start_page = current_page
             for page in reader.pages:
-                writer.add_page(page)
+                content_writer.add_page(page)
                 current_page += 1
             item_page_map.append((item, start_page))
 
-        # 2) 写中间文件
-        buf = io.BytesIO()
-        writer.write(buf)
-        buf.seek(1)  # 跳过空白封面（先放真实封面到第 1 页）
+        total_content_pages = current_page - content_start
 
-        # 3) 重新拼装：生成封面 PDF 和目录 PDF
+        # 3) 内容写到 buffer
+        content_buf = io.BytesIO()
+        content_writer.write(content_buf)
+        content_buf.seek(0)
+
+        # 4) 生成封面 PDF
         cover_buf = io.BytesIO()
         cover_canvas = canvas.Canvas(cover_buf, pagesize=A4)
-        _draw_cover(cover_canvas, project, current_page - 2)
+        _draw_cover(cover_canvas, project, total_content_pages)
         cover_canvas.save()
         cover_buf.seek(0)
 
+        # 5) 生成目录 PDF
         toc_buf = io.BytesIO()
         toc_canvas = canvas.Canvas(toc_buf, pagesize=A4)
         _draw_toc(toc_canvas, item_page_map)
         toc_canvas.save()
         toc_buf.seek(0)
 
-        # 4) 合并：封面 + 目录 + 中间
+        # 6) 合并：封面 + 目录 + 内容
         final_writer = PdfWriter()
-        for pdf_buf in (cover_buf, toc_buf, buf):
+        for pdf_buf in (cover_buf, toc_buf, content_buf):
             r = PdfReader(pdf_buf)
             for page in r.pages:
                 final_writer.add_page(page)
 
-        # 5) 输出
+        # 7) 输出
         final_dir = safe_join(settings.PROJECTS_DIR, project_id, "final")
         final_dir.mkdir(parents=True, exist_ok=True)
         safe_name = (project.name or project_id).replace("/", "_").replace("\\", "_")[:30]
@@ -191,7 +219,7 @@ def build_settlement(db: Session, project_id: str, requester_ip: str = "") -> Se
         with open(out_path, "wb") as f:
             final_writer.write(f)
 
-        # 6) 更新日志
+        # 8) 更新日志
         log.status = "success"
         log.finished_at = datetime.utcnow()
         log.output_path = str(out_path)

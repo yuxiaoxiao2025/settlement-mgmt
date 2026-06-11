@@ -15,32 +15,12 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import Layout from '@/components/Layout'
+import ProjectDetail from '@/pages/ProjectDetail'
+import ProjectEdit from '@/pages/ProjectEdit'
 import ProjectList from '@/pages/ProjectList'
 import ProjectNew from '@/pages/ProjectNew'
 import Settlement from '@/pages/Settlement'
 import TemplateManager from '@/pages/TemplateManager'
-
-// ---- 占位页面（T-FE-B 的项目详情/编辑页待补；T-FE-C 页面已实装） ----
-
-function PlaceholderPage({ title, hint }: { title: string; hint?: string }) {
-  return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div className="card max-w-md p-8 text-center">
-        <h1 className="mb-2 text-2xl font-bold text-gray-900">{title}</h1>
-        <p className="text-sm text-gray-500">
-          {hint ?? '此页面正在由其他 worker 实现。'}
-        </p>
-      </div>
-    </div>
-  )
-}
-
-const ProjectDetail = () => (
-  <PlaceholderPage title="项目详情" hint="由 T-FE-B 实现。" />
-)
-const ProjectEdit = () => (
-  <PlaceholderPage title="编辑项目" hint="由 T-FE-B 实现。" />
-)
 
 export default function App() {
   return (

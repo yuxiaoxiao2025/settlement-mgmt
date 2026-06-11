@@ -47,13 +47,13 @@ async def lifespan(app: FastAPI):
     else:
         print("[WARN] 文件监听不可用，已回退到手动刷新")
 
-    # 3. 探测 WPS
-    from app.services.pdf_converter import get_wps
-    wps = get_wps()
+    # 3. 探测 WPS（启动时一次，结果缓存到 wps_detector）
+    from app.core.wps_detector import init_wps_detector
+    wps = init_wps_detector(settings.WPS_PATH)
     if wps:
         print(f"[OK] WPS CLI: {wps}")
     else:
-        print("[WARN] 未找到 WPS CLI，PDF 转码功能不可用")
+        print("[WARN] 未找到 WPS CLI，PDF 转码功能不可用（非 PDF 文件仍可入库，仅无预览）")
 
     # 4. 打印所有网卡 IP（方便局域网访问）
     print("\n" + "=" * 60)
@@ -93,7 +93,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS + ["*"],  # 局域网开放
+    allow_origins=settings.CORS_ORIGINS,  # 不再加 "*"，spec 合规
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -120,22 +120,31 @@ async def access_log_middleware(request: Request, call_next):
     return response
 
 
-# 全局错误处理
+# 全局错误处理（H4: 日志化，避免泄漏原始异常）
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    import logging
+    logger = logging.getLogger("app")
+    logger.exception(
+        "unhandled exception path=%s method=%s",
+        request.url.path,
+        request.method,
+    )
     return JSONResponse(
         status_code=500,
-        content={"detail": str(exc), "code": "internal_error"},
+        content={"detail": "服务器内部错误", "code": "internal_error"},
     )
 
 
 # 健康检查
 @app.get("/api/health")
 def health():
+    from app.core.wps_detector import get_wps_path
     return {
         "status": "ok",
         "watcher": _watcher.is_available if _watcher else False,
-        "wps": bool(_watcher),  # 简单占位
+        "watcher_mode": _watcher.mode if _watcher else "stopped",
+        "wps": get_wps_path() is not None,
     }
 
 

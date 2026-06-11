@@ -92,7 +92,7 @@ function ProjectEdit() {
  });
 
  try {
- await apiClient.patch(`/api/projects/${encodeURIComponent(id)}`, payload);
+ await apiClient.patch(`/projects/${encodeURIComponent(id)}`, payload);
  navigate(`/projects/${id}`);
  } catch (e: unknown) {
  const ax = e as { response?: { data?: { detail?: string } }; message?: string };
