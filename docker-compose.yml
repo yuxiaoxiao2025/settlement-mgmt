@@ -1,4 +1,5 @@
-# 项目结算资料管理 — Docker 一键启动
+# 项目结算资料管理 — Docker 一键启动（v0.3.1+ 公网部署）
+#
 # 用法：
 #   docker compose up -d --build      # 首次：构建并后台启动
 #   docker compose logs -f            # 看日志
@@ -6,12 +7,18 @@
 #   docker compose restart backend    # 重启单个服务
 #
 # 端口（特意挑了 18000/18080 这种"偏远"段，避开常用端口冲突）：
-#   - 前端  http://localhost:18080     （nginx serve 静态 dist）
-#   - 后端  http://localhost:18000     （FastAPI；通常不直接访问，走前端 /api 反代）
+#   - 前端  http://<公网IP>:18080   （nginx serve 静态 dist）
+#   - 后端  http://<公网IP>:18000   （FastAPI；通常不直接访问，走前端 /api 反代）
+#
+# 公网部署必读：
+#   1. .env 文件必须在仓库根，包含 ADMIN_USERNAME/PASSWORD/SITE_VERIFICATION_CODE/JWT_SECRET
+#      （v0.3.1+ 鉴权强制要求，缺一即 fail-fast）
+#   2. 强烈建议前置 nginx + HTTPS（否则 cookie 只能 secure=false，HttpOnly 仍生效）
+#   3. CORS_ORIGINS 必须包含你的公网访问来源（见下）
 #
 # 数据持久化：
-#   - ./data    → 容器 /data          （SQLite 数据库）
-#   - ./projects → 容器 /projects    （项目实例资料）
+#   - ./data    → 容器 /data          （SQLite 数据库 + 访问日志）
+#   - ./projects → 容器 /projects    （项目实例资料 — 上传的文件落地这里）
 
 services:
   backend:
@@ -26,19 +33,19 @@ services:
     volumes:
       - ./data:/data
       - ./projects:/projects
-      # 可选：挂载你的 25 项完整模版覆盖默认种子
-      # 用法：把完整 master_template.json 放到 ./seeds/25.json，然后取消下面这行注释
-      # - ./seeds/25.json:/data/master_template.json:ro
+      # ── v0.3.1+ 公网鉴权 secrets（不进 git） ──
+      - ./.env:/app/.env:ro
     environment:
-      # 容器内路径（与 backend/Dockerfile ENV 一致；显式列出更清晰）
+      # 容器内路径（与 backend/Dockerfile ENV 一致）
       DATA_DIR: /data
       PROJECTS_DIR: /projects
       DB_PATH: /data/settlement.db
       TEMPLATE_PATH: /data/master_template.json
-      # CORS：允许本地任意来源 + 同源 18080
-      CORS_ORIGINS: '["http://localhost","http://localhost:18080","http://127.0.0.1","http://127.0.0.1:18080","http://localhost:5173"]'
-      # 关闭访问日志以减少写盘（局域网小工具场景）
-      ACCESS_LOG: "false"
+      # CORS：本地 + 公网（部署时把 PUBLIC_ORIGIN 改成你的公网域名或 IP）
+      # ⚠️ 列表里不要含 "null" 也不要含 "*" — 后端会拒绝
+      CORS_ORIGINS: '["http://localhost","http://localhost:18080","http://127.0.0.1","http://127.0.0.1:18080","http://localhost:5173","http://YOUR_PUBLIC_IP","https://YOUR_PUBLIC_DOMAIN"]'
+      # 开启访问日志（公网必备 — 谁在试登录一目了然）
+      ACCESS_LOG: "true"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18000/api/health"]
       interval: 30s

@@ -1,7 +1,7 @@
 """FastAPI 主入口。"""
 import socket
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -10,7 +10,7 @@ from app.config import settings
 from app.database import init_db, SessionLocal
 from app.services.watcher_service import WatcherService
 from app.services.file_service import ingest_path, remove_path
-from app.routers import projects, items, files, template, settlement
+from app.routers import projects, items, files, template, settlement, auth
 from app.models import AccessLog
 from pathlib import Path
 
@@ -35,6 +35,13 @@ def _on_watcher_event(event_type: str, kind: str, path: Path):
 async def lifespan(app: FastAPI):
     """启动 + 关闭钩子。"""
     global _watcher
+    # 0. Auth 配置校验 — fail-fast，避免 secret 缺失时跑到一半才报错
+    from app.config import settings as _s
+    missing = [k for k in ("ADMIN_USERNAME", "ADMIN_PASSWORD", "SITE_VERIFICATION_CODE", "JWT_SECRET") if not getattr(_s, k)]
+    if missing:
+        print(f"\n[FATAL] auth not configured. Missing in .env: {', '.join(missing)}\n")
+        raise RuntimeError(f"auth misconfigured: missing {missing}")
+
     # 1. 初始化 DB
     init_db()
     print("[OK] 数据库初始化完成")
@@ -91,6 +98,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# slowapi — 限速（login 端点 IP-level 限 10/5min）
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.routers.auth import limiter as auth_limiter
+app.state.limiter = auth_limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,  # 不再加 "*"，spec 合规
@@ -136,7 +150,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# 健康检查
+# 健康检查（公开 — 容器健康探针和监控用）
 @app.get("/api/health")
 def health():
     from app.core.wps_detector import get_wps_path
@@ -148,12 +162,14 @@ def health():
     }
 
 
-# 挂载路由
-app.include_router(projects.router)
-app.include_router(items.router)
-app.include_router(files.router)
-app.include_router(template.router)
-app.include_router(settlement.router)
+# Auth 路由（登录/登出/me — 登录本身是公开的）
+app.include_router(auth.router)
+
+
+# 业务路由（v0.3.1+ 公网部署：全部需要 JWT 鉴权）
+# 在 include_router 时挂 dependencies，不直接 mutate router 对象（避免覆盖原本 Depends）
+for _router in (projects.router, items.router, files.router, template.router, settlement.router):
+    app.include_router(_router, dependencies=[Depends(auth.require_user)])
 
 
 if __name__ == "__main__":
