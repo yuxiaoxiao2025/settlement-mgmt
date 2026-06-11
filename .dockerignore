@@ -1,0 +1,45 @@
+# 顶层 .dockerignore：影响 docker build 时的构建上下文
+# 后端构建上下文只需要 backend/ 目录
+# 前端构建上下文只需要 frontend/ 目录
+# 顶层 docker-compose.yml 用不到此文件，但留作保险
+
+# 业务运行时数据（不入仓，docker 也无需）
+data/
+projects/
+
+# 工具/状态
+.mavis/
+.opencode/
+.git/
+.github/
+.mavis-trash/
+.pytest_cache/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 日志
+*.log
+
+# 用户私有资料
+/项目结算资料交接清单.docx
+
+# 根目录脏文件
+{
+*.tsbuildinfo
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# 文档（不入 docker 构建）
+docs/
+CLAUDE.md
+README.md
+scripts/

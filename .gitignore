@@ -72,6 +72,16 @@ frontend/.vite/
 frontend/tsconfig.tsbuildinfo
 *.tsbuildinfo
 
+# Docker 运行时目录（不入仓，运行时自动建）
+data/
+projects/
+/seeds/
+
+# 用户自定义覆盖文件
+.env
+.env.local
+*.local
+
 # Playwright 错误日志泄到文件系统的残留
 {
 "{

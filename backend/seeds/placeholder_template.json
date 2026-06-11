@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "source": "placeholder",
+  "items": [
+    {"seq": 1,  "name": "招标文件",            "description": "复印件加盖公章", "is_default": true, "folder_name": "招标文件"},
+    {"seq": 2,  "name": "中标通知书",          "description": "原件",         "is_default": true, "folder_name": "中标通知书"},
+    {"seq": 3,  "name": "施工合同",            "description": "复印件加盖公章", "is_default": true, "folder_name": "施工合同"},
+    {"seq": 4,  "name": "竣工验收报告",        "description": "原件",         "is_default": true, "folder_name": "竣工验收报告"},
+    {"seq": 5,  "name": "结算书",              "description": "原件",         "is_default": true, "folder_name": "结算书"}
+  ]
+}

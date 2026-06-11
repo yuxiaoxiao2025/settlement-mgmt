@@ -1,0 +1,36 @@
+# 前端构建上下文专用 .dockerignore
+# 排除与 Node 构建无关的所有文件
+
+# 后端
+backend/
+
+# 工具/状态
+.mavis/
+.opencode/
+.git/
+.gitignore
+.dockerignore
+.mavis-trash/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 日志
+*.log
+
+# 文档
+docs/
+CLAUDE.md
+README.md
+scripts/
+
+# 根目录脏文件
+{
+*.tsbuildinfo
+*.pyc
+__pycache__/
+
+# 用户私有资料
+项目结算资料交接清单.docx

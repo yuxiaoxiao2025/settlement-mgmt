@@ -252,3 +252,101 @@ bash scripts/bootstrap.sh
 ## 9. 许可 & 联系
 
 本项目为内部工具。技术栈：FastAPI + React + SQLite + ReportLab（PDF 生成）+ mammoth / SheetJS / pdf.js（前端预览）。
+
+---
+
+## 10. Docker 一键部署（推荐）
+
+> 如果你装了 **Docker Desktop**，直接走这条路最省事 — 不用装 Python / Node，前后端在容器里跑，文件改动不污染宿主机。
+
+### 10.1 前置
+
+- 安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)（Windows / macOS / Linux）
+- 启动 Docker Desktop（系统托盘图标亮起）
+
+### 10.2 启动
+
+**Windows**：双击 `scripts\docker-up.bat`
+**macOS / Linux**：终端跑 `bash scripts/docker-up.sh`
+
+脚本会：
+1. 自动建 `data/` `projects/` 目录（首次）
+2. 构建 backend 镜像（Python 3.11 + 中文字体）≈ 2 分钟
+3. 构建 frontend 镜像（Node 22 build + nginx）≈ 1 分钟
+4. 后台启动两个容器
+5. 自动拉起浏览器 → http://localhost
+
+### 10.3 端口
+
+| 端口 | 服务 | 备注 |
+|------|------|------|
+| **80**  | 前端（nginx serve dist + /api 反代） | **唯一需要访问的端口** |
+| 8000 | 后端 FastAPI | 通常不直连，由前端 nginx 转发 |
+
+### 10.4 数据持久化
+
+容器删除后数据不丢：
+
+```
+宿主机                  →  容器内
+./data/                →  /data      （SQLite 数据库 + 主模板）
+./projects/            →  /projects  （项目实例 + 上传的文件）
+```
+
+### 10.5 自定义 25 项模版
+
+默认镜像内嵌 5 项占位模版。要用你那份完整的 25 项标准资料：
+
+```cmd
+mkdir seeds
+copy E:\path\to\你的\完整master_template.json seeds\25.json
+```
+
+然后编辑 `docker-compose.yml`，取消下面这行注释：
+```yaml
+volumes:
+  - ./seeds/25.json:/data/master_template.json:ro
+```
+
+下次 `docker compose up -d` 时，完整模版会覆盖占位版（首次启动后才能覆盖，容器内运行时不要直接改）。
+
+### 10.6 常用命令
+
+```bash
+docker compose up -d --build     # 构建并后台启动
+docker compose logs -f            # 实时日志
+docker compose logs -f backend    # 只看后端日志
+docker compose ps                 # 容器状态
+docker compose restart backend    # 重启后端
+docker compose down               # 停止（保留数据）
+docker compose down -v            # 停止并清空数据卷（慎用）
+docker system prune -a            # 清理悬空镜像
+```
+
+### 10.7 局域网访问
+
+容器把 80 端口映射到宿主机 80。同事访问 `http://<你电脑IP>:80` 即可（同防火墙放行 80 端口）。
+
+> Docker Desktop Windows 默认用 WSL2 后端，IP 通常是 WSL 虚拟网卡的。打开 cmd 跑 `ipconfig` 找 `WSL` 那块的 IP，或者直接用 `localhost`。
+
+### 10.8 文件结构（Docker 视角）
+
+```
+.
+├── docker-compose.yml         # 一键编排（后端 + 前端两个 service）
+├── backend/
+│   ├── Dockerfile             # python:3.11-slim + 中文字体
+│   ├── requirements.txt
+│   ├── app/                    # 业务代码
+│   └── seeds/
+│       └── placeholder_template.json   # 5 项占位种子
+├── frontend/
+│   ├── Dockerfile             # 多阶段：node:22 build → nginx serve
+│   ├── nginx.conf             # 80 端口 + /api 反代 backend:8000
+│   └── src/                    # 业务代码
+├── data/                       # 运行时生成（SQLite + 模板）
+├── projects/                   # 运行时生成（项目实例）
+└── scripts/
+    ├── docker-up.bat / .sh     # 一键启动
+    └── docker-down.bat / .sh   # 一键停止
+```

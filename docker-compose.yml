@@ -1,0 +1,65 @@
+# 项目结算资料管理 — Docker 一键启动
+# 用法：
+#   docker compose up -d --build      # 首次：构建并后台启动
+#   docker compose logs -f            # 看日志
+#   docker compose down               # 停止
+#   docker compose restart backend    # 重启单个服务
+#
+# 端口：
+#   - 前端  http://localhost:80        （nginx serve 静态 dist）
+#   - 后端  http://localhost:8000      （FastAPI；通常不直接访问，走前端 /api 反代）
+#
+# 数据持久化：
+#   - ./data    → 容器 /data          （SQLite 数据库）
+#   - ./projects → 容器 /projects    （项目实例资料）
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: settlement-backend:0.1.0
+    container_name: settlement-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+      - ./projects:/projects
+      # 可选：挂载你的 25 项完整模版覆盖默认种子
+      # 用法：把完整 master_template.json 放到 ./seeds/25.json，然后取消下面这行注释
+      # - ./seeds/25.json:/data/master_template.json:ro
+    environment:
+      # 容器内路径（与 backend/Dockerfile ENV 一致；显式列出更清晰）
+      DATA_DIR: /data
+      PROJECTS_DIR: /projects
+      DB_PATH: /data/settlement.db
+      TEMPLATE_PATH: /data/master_template.json
+      # CORS：允许本地任意来源 + 同源 80
+      CORS_ORIGINS: '["http://localhost","http://localhost:80","http://127.0.0.1","http://127.0.0.1:80","http://localhost:5173"]'
+      # 关闭访问日志以减少写盘（局域网小工具场景）
+      ACCESS_LOG: "false"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: settlement-frontend:0.1.0
+    container_name: settlement-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
