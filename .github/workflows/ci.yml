@@ -64,7 +64,9 @@ jobs:
         run: npm ci
 
       - name: Type check
-        run: npx tsc -b --noEmit
+        # 用 tsc -b（project references 模式），不能加 --noEmit
+        # （project reference 要求子项目 emit，--noEmit 会报 TS6310）
+        run: npx tsc -b
 
       - name: Unit tests
         run: npm run test:run

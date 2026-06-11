@@ -32,6 +32,9 @@ data/uploads/
 projects/
 data/
 master_template*.json
+# 例外：测试夹具里的 master_template.json（CI 必需）
+!backend/tests/fixtures/
+!backend/tests/fixtures/master_template.json
 
 # Mavis / OpenCode 内部状态
 .mavis/
@@ -76,6 +79,9 @@ frontend/tsconfig.tsbuildinfo
 data/
 projects/
 /seeds/
+# 例外：测试夹具里的 master_template.json（CI 必需）
+!backend/tests/fixtures/
+!backend/tests/fixtures/master_template.json
 
 # 用户自定义覆盖文件
 .env
