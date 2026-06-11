@@ -31,7 +31,15 @@ def get_or_load_template_items() -> list[dict]:
 
 
 def create_project(db: Session, payload: dict) -> Project:
-    """创建项目 + 自动建 25 个 item + 25 个子文件夹。"""
+    """创建项目 + 自动建 item + 子文件夹。
+
+    行为：
+      - payload 含 `selected_template_seqs`（非空 list）→ 只建勾选 seq 对应的 item
+      - payload 中 `selected_template_seqs` 缺省 / None / [] → 沿用旧行为：建全量模板项
+    """
+    # 提取并移除 selected_template_seqs（不是 Project 模型的字段）
+    selected_seqs = payload.pop("selected_template_seqs", None)
+
     p = Project(**payload)
     db.add(p)
     db.flush()  # 拿到 p.id
@@ -39,10 +47,20 @@ def create_project(db: Session, payload: dict) -> Project:
     # 拉模版
     template_items = get_or_load_template_items()
 
+    # 筛选要建的项
+    # - selected_seqs is None      → 旧行为：建全量（向后兼容）
+    # - selected_seqs is []        → 一个都不建（用户明确选"全不选"）
+    # - selected_seqs is [1, 5, 7] → 只建这些 seq 对应的项
+    if selected_seqs is None:
+        items_to_create = template_items
+    else:
+        seq_set = set(int(s) for s in selected_seqs)
+        items_to_create = [ti for ti in template_items if int(ti["seq"]) in seq_set]
+
     # 建子文件夹 + 入 item
     project_dir = safe_join(settings.PROJECTS_DIR, p.id)
     project_dir.mkdir(parents=True, exist_ok=True)
-    for ti in template_items:
+    for ti in items_to_create:
         seq = ti["seq"]
         folder_name = ti.get("folder_name") or _sanitize_name(ti["name"])
         sub = project_dir / f"{seq:02d}_{folder_name}"

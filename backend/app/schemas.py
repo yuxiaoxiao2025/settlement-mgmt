@@ -14,6 +14,10 @@ class ProjectCreate(BaseModel):
     handover_person: Optional[str] = None
     receiving_unit: Optional[str] = None
     receiving_person: Optional[str] = None
+    # ─── 模板选择（v0.2.0 新增）───
+    # None 或 []  → 沿用旧行为：按全量模板建 25 项
+    # [1, 5, 7]  → 只建 seq 1/5/7 三项（用于"小项目只要关键资料"场景）
+    selected_template_seqs: Optional[List[int]] = None
 
     @field_validator("deadline")
     @classmethod

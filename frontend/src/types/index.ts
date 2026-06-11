@@ -53,6 +53,12 @@ export interface ProjectCreatePayload {
   handover_person?: string | null
   receiving_unit?: string | null
   receiving_person?: string | null
+  /**
+   * 新建项目时勾选的模板项 seq 列表。
+   * - undefined / null / [] → 沿用旧行为：建全量模板项（25 项）
+   * - [1, 5, 7]             → 只建 seq 1/5/7 三项
+   */
+  selected_template_seqs?: number[] | null
 }
 
 /** PATCH /api/projects/{id} 请求体 — 全部 optional */

@@ -234,6 +234,86 @@ def test_delete_archived_project_succeeds(client, sample_project):
     assert r.status_code == 204
 
 
+# ============ 模板选择（v0.2.0）============
+
+
+def test_create_project_without_selected_seqs_creates_all_items(
+    client, sample_project
+):
+    """旧行为：不传 selected_template_seqs → 建全量 25 项（向后兼容）。"""
+    r = client.get(f"/api/projects/{sample_project['id']}")
+    assert r.json()["progress"]["total"] == 25
+
+
+def test_create_project_with_empty_selected_seqs_creates_no_items(client, settings):
+    """空列表 → 一个都不建（用户明确选择创建空项目）。"""
+    today = date.today()
+    r = client.post(
+        "/api/projects",
+        json={
+            "name": "空项目",
+            "deadline": (today + timedelta(days=30)).isoformat(),
+            "selected_template_seqs": [],
+        },
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    assert r.json()["progress"]["total"] == 0
+    # 磁盘上项目目录应存在但**没有子文件夹**
+    assert (settings.PROJECTS_DIR / pid).exists()
+    children = [
+        d for d in (settings.PROJECTS_DIR / pid).iterdir()
+        if d.is_dir() and d.name != "_unclaimed"
+    ]
+    assert children == [], f"空项目不应建任何子文件夹，但有: {children}"
+
+
+def test_create_project_with_selected_seqs_creates_only_those(
+    client, settings
+):
+    """只勾选 [1, 5, 10] → 项目下只建 3 个 item + 3 个子文件夹。"""
+    today = date.today()
+    r = client.post(
+        "/api/projects",
+        json={
+            "name": "小项目",
+            "deadline": (today + timedelta(days=30)).isoformat(),
+            "selected_template_seqs": [1, 5, 10],
+        },
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    body = r.json()
+    assert body["progress"]["total"] == 3
+    # 磁盘上应有 3 个子文件夹
+    children = sorted([
+        d.name for d in (settings.PROJECTS_DIR / pid).iterdir()
+        if d.is_dir() and d.name != "_unclaimed"
+    ])
+    assert len(children) == 3, f"应有 3 个子文件夹，实际: {children}"
+    # 顺序应保持模板的 seq
+    assert children[0].startswith("01_")
+    assert children[1].startswith("05_")
+    assert children[2].startswith("10_")
+
+
+def test_create_project_with_invalid_seq_silently_ignored(
+    client, settings
+):
+    """越界 seq（如 999）静默忽略，只建合法的。"""
+    today = date.today()
+    r = client.post(
+        "/api/projects",
+        json={
+            "name": "含越界",
+            "deadline": (today + timedelta(days=30)).isoformat(),
+            "selected_template_seqs": [1, 999, 5],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["progress"]["total"] == 2
+
+
 # ============ 进度计算 ============
 
 def test_progress_initial_state(client, sample_project):
