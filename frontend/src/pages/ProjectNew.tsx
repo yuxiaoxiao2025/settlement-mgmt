@@ -1,5 +1,5 @@
 /**
- * 新建项目页（CONTEXT-04 §2.2 ProjectCreatePayload + SPEC §3.1）
+ * 新建项目 — 第 1 步：项目基本信息（CONTEXT-04 §2.2 + SPEC §3.1）
  *
  * 表单字段（与后端 ProjectCreate schema 一致）：
  *   - name              必填
@@ -9,33 +9,24 @@
  *   - handover_person   选填
  *   - receiving_unit    选填
  *   - receiving_person  选填
- *   - selected_template_seqs 选填（List[int]，新增）— 新建时只建勾选的模板项
  *
- * 模板选择区：
- *   - 加载全局模版 GET /api/template
- *   - 多选复选框，每行带"序号+名称+描述+默认/扩展徽章"
- *   - 快捷操作：[全选] [全不选] [反选] [只选默认项]
- *   - 不勾任何项 = 0 项项目（用户可以纯自定义）
- *   - 默认行为：进页面时**全选**
+ * 流程（v0.3.0 起分两步）：
+ *   1. 本页填项目基本信息 → 「下一步」
+ *   2. 跳到 /projects/new/template 选择资料项（独立页）
  *
- * 提交：
- *   - useCreateProject mutation，传 selected_template_seqs
- *   - 成功后 navigate('/projects/:id')
- *   - 失败显示后端 detail
+ * 提交流：location.state 传第 2 步（刷新即丢，符合"草稿"语义）。
  *
  * 客户端预校验（SPEC-PR-2）：
  *   - 截止日期 ≥ 移交日期
  *   - 截止日期 ≥ 今天
  */
 
-import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Save, AlertCircle, CheckSquare, Square, ListChecks } from 'lucide-react'
+import { useState } from 'react'
+import { useNavigate, Link, useLocation } from 'react-router-dom'
+import { ArrowLeft, ArrowRight, AlertCircle } from 'lucide-react'
 
-import { useCreateProject } from '@/hooks/useProjects'
-import { getTemplate } from '@/api/template'
 import { emptyToNull } from '@/lib/format'
-import type { ProjectCreatePayload, Template, TemplateItem } from '@/types'
+import type { ProjectBasicInfo } from '@/types'
 
 interface FormState {
   name: string
@@ -69,41 +60,26 @@ function defaultForm(): FormState {
 
 export default function ProjectNew() {
   const navigate = useNavigate()
-  const create = useCreateProject()
+  const location = useLocation()
+  const incoming = (location.state as ProjectBasicInfo | null) ?? null
 
-  const [form, setForm] = useState<FormState>(defaultForm)
+  const [form, setForm] = useState<FormState>(() => {
+    if (incoming) {
+      return {
+        name: incoming.name,
+        handover_date: incoming.handover_date ?? '',
+        deadline: incoming.deadline,
+        construction_unit: incoming.construction_unit ?? '',
+        handover_person: incoming.handover_person ?? '',
+        receiving_unit: incoming.receiving_unit ?? '',
+        receiving_person: incoming.receiving_person ?? '',
+      }
+    }
+    return defaultForm()
+  })
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>(
     {},
   )
-
-  // 模板数据 + 选中状态
-  const [template, setTemplate] = useState<Template | null>(null)
-  const [templateLoading, setTemplateLoading] = useState(true)
-  const [selectedSeqs, setSelectedSeqs] = useState<Set<number>>(new Set())
-
-  useEffect(() => {
-    let cancelled = false
-    setTemplateLoading(true)
-    getTemplate()
-      .then((t) => {
-        if (cancelled) return
-        setTemplate(t)
-        // 默认全选
-        setSelectedSeqs(new Set(t.items.map((it) => it.seq)))
-      })
-      .catch((e) => {
-        if (cancelled) return
-        // 加载失败不阻塞项目创建（后端会兜底建全量）
-        // eslint-disable-next-line no-console
-        console.error('加载模版失败', e)
-      })
-      .finally(() => {
-        if (!cancelled) setTemplateLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -113,38 +89,6 @@ export default function ProjectNew() {
       delete next[key]
       return next
     })
-  }
-
-  // ─── 复选框操作 ───
-  const allSeqs = useMemo(
-    () => (template?.items ?? []).map((it) => it.seq),
-    [template],
-  )
-  const isAllSelected =
-    !templateLoading && allSeqs.length > 0 && selectedSeqs.size === allSeqs.length
-  const isNoneSelected = selectedSeqs.size === 0
-
-  const toggleOne = (seq: number) => {
-    setSelectedSeqs((prev) => {
-      const next = new Set(prev)
-      if (next.has(seq)) next.delete(seq)
-      else next.add(seq)
-      return next
-    })
-  }
-
-  const selectAll = () => setSelectedSeqs(new Set(allSeqs))
-  const selectNone = () => setSelectedSeqs(new Set())
-  const invertSelection = () => {
-    setSelectedSeqs(
-      new Set(allSeqs.filter((s) => !selectedSeqs.has(s))),
-    )
-  }
-  const selectDefaultsOnly = () => {
-    if (!template) return
-    setSelectedSeqs(
-      new Set(template.items.filter((it) => it.is_default).map((it) => it.seq)),
-    )
   }
 
   function validate(): boolean {
@@ -167,11 +111,11 @@ export default function ProjectNew() {
     return Object.keys(next).length === 0
   }
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  function handleNext(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!validate()) return
 
-    const payload: ProjectCreatePayload = {
+    const basic: ProjectBasicInfo = {
       name: form.name.trim(),
       handover_date: form.handover_date || null,
       deadline: form.deadline,
@@ -179,24 +123,9 @@ export default function ProjectNew() {
       handover_person: emptyToNull(form.handover_person),
       receiving_unit: emptyToNull(form.receiving_unit),
       receiving_person: emptyToNull(form.receiving_person),
-      // 模板选择：只有用户显式操作过（点了全选/全不选/反选/只选默认/手动勾）才传 selected_template_seqs
-      // — 否则不传，沿用后端兜底（建全量）
-      // 实现：始终传，传空数组 = 一个都不建（这是用户明确选的）
-      selected_template_seqs: Array.from(selectedSeqs).sort((a, b) => a - b),
     }
-
-    try {
-      const project = await create.mutateAsync(payload)
-      // 成功后跳到项目详情
-      navigate(`/projects/${project.id}`)
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('创建项目失败', err)
-    }
+    navigate('/projects/new/template', { state: basic })
   }
-
-  const submitting = create.isPending
-  const submitError = create.error
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -211,28 +140,34 @@ export default function ProjectNew() {
         </Link>
         <h1 className="text-2xl font-bold text-gray-900">新建项目</h1>
         <p className="mt-1 text-sm text-gray-500">
-          填写项目基本信息，并从标准模版中选择本项目需要的资料项。
+          第 1 步 / 共 2 步 — 填写项目基本信息
         </p>
+
+        {/* 步骤指示 */}
+        <ol className="mt-4 flex items-center gap-2 text-sm">
+          <li className="flex items-center gap-2 font-semibold text-blue-600">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs text-white">
+              1
+            </span>
+            项目信息
+          </li>
+          <span className="text-gray-300">→</span>
+          <li className="flex items-center gap-2 text-gray-400">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full border border-gray-300 text-xs">
+              2
+            </span>
+            资料项选择
+          </li>
+        </ol>
       </header>
 
       {/* ============ Form ============ */}
-      <form onSubmit={handleSubmit} className="card space-y-5 p-6" noValidate>
+      <form onSubmit={handleNext} className="card space-y-5 p-6" noValidate>
         {/* 错误摘要 */}
         {Object.keys(errors).length > 0 && (
           <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>请修正表单中标红的字段后再提交。</div>
-          </div>
-        )}
-
-        {/* 后端错误 */}
-        {submitError && (
-          <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              创建失败：
-              {submitError instanceof Error ? submitError.message : '未知错误'}
-            </div>
+            <div>请修正表单中标红的字段后再继续。</div>
           </div>
         )}
 
@@ -246,6 +181,7 @@ export default function ProjectNew() {
             placeholder="例如：XX 高速 2024 路面工程"
             maxLength={200}
             required
+            autoFocus
           />
         </Field>
 
@@ -326,126 +262,14 @@ export default function ProjectNew() {
           </div>
         </fieldset>
 
-        {/* 模板选择 */}
-        <fieldset className="space-y-3 border-t border-gray-100 pt-4">
-          <div className="flex items-center justify-between">
-            <legend className="text-sm font-semibold text-gray-700">
-              资料项模板
-              <span className="ml-2 text-xs font-normal text-gray-500">
-                （已选{' '}
-                <span className="font-semibold text-gray-900">
-                  {selectedSeqs.size}
-                </span>{' '}
-                / {allSeqs.length} 项）
-              </span>
-            </legend>
-          </div>
-
-          {/* 快捷操作 */}
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <button
-              type="button"
-              onClick={selectAll}
-              disabled={isAllSelected || templateLoading}
-              className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-              title="勾选全部模板项"
-            >
-              <CheckSquare className="h-3.5 w-3.5" />
-              全选
-            </button>
-            <button
-              type="button"
-              onClick={selectNone}
-              disabled={isNoneSelected}
-              className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-              title="取消所有勾选（创建空项目）"
-            >
-              <Square className="h-3.5 w-3.5" />
-              全不选
-            </button>
-            <button
-              type="button"
-              onClick={invertSelection}
-              disabled={templateLoading || allSeqs.length === 0}
-              className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-              title="反选：勾上的变不勾，不勾的变勾上"
-            >
-              <ListChecks className="h-3.5 w-3.5" />
-              反选
-            </button>
-            <button
-              type="button"
-              onClick={selectDefaultsOnly}
-              disabled={
-                templateLoading ||
-                !template?.items.some((it) => it.is_default)
-              }
-              className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-              title="仅保留标准交接清单的项（去除历史扩展项）"
-            >
-              只选默认项
-            </button>
-            <span className="ml-auto text-xs text-gray-400">
-              {isNoneSelected
-                ? '⚠ 不勾任何项将创建空项目（可后续手动添加）'
-                : isAllSelected
-                ? '✓ 全部勾选'
-                : `已勾选 ${selectedSeqs.size} 项`}
-            </span>
-          </div>
-
-          {/* 模板项列表 */}
-          <div className="max-h-72 overflow-y-auto rounded-md border border-gray-200 bg-gray-50/50 p-2">
-            {templateLoading ? (
-              <div className="p-4 text-center text-sm text-gray-500">
-                加载模版中…
-              </div>
-            ) : !template || template.items.length === 0 ? (
-              <div className="p-4 text-center text-sm text-gray-500">
-                模版为空，请到「模版管理」页添加项
-              </div>
-            ) : (
-              <ul className="space-y-1">
-                {template.items.map((it) => (
-                  <TemplateCheckboxRow
-                    key={it.seq}
-                    item={it}
-                    checked={selectedSeqs.has(it.seq)}
-                    onToggle={() => toggleOne(it.seq)}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <p className="text-xs text-gray-500">
-            提示：小项目可能只要部分资料项（只勾关键的）；大项目可全选 + 项目内手动添加扩展项。
-            <br />
-            勾选项对应项目下自动创建的子文件夹（如 01_招标文件 / 02_中标通知书…）。
-          </p>
-        </fieldset>
-
         {/* 操作 */}
         <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
           <Link to="/" className="btn-secondary">
             取消
           </Link>
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={submitting}
-            title={
-              isNoneSelected
-                ? '将创建一个空项目（没有资料项），确定吗？'
-                : undefined
-            }
-          >
-            <Save className="h-4 w-4" />
-            {submitting
-              ? '创建中…'
-              : isNoneSelected
-              ? '创建空项目'
-              : `创建项目（${selectedSeqs.size} 项）`}
+          <button type="submit" className="btn-primary">
+            下一步：选择资料项
+            <ArrowRight className="h-4 w-4" />
           </button>
         </div>
       </form>
@@ -472,54 +296,5 @@ function Field({ label, required, error, children }: FieldProps) {
       {children}
       {error && <span className="mt-1 block text-xs text-red-600">{error}</span>}
     </label>
-  )
-}
-
-interface TemplateCheckboxRowProps {
-  item: TemplateItem
-  checked: boolean
-  onToggle: () => void
-}
-
-function TemplateCheckboxRow({ item, checked, onToggle }: TemplateCheckboxRowProps) {
-  return (
-    <li>
-      <label
-        className={`flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 transition-colors hover:bg-white ${
-          checked ? 'bg-blue-50/60' : ''
-        }`}
-      >
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={onToggle}
-          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-        />
-        <span className="w-8 shrink-0 font-mono text-xs tabular-nums text-gray-400">
-          {String(item.seq).padStart(2, '0')}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-900">
-              {item.name}
-            </span>
-            <span
-              className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                item.is_default
-                  ? 'bg-green-100 text-green-700'
-                  : 'bg-purple-100 text-purple-700'
-              }`}
-            >
-              {item.is_default ? '默认' : '扩展'}
-            </span>
-          </div>
-          {item.description && (
-            <p className="mt-0.5 truncate text-xs text-gray-500">
-              {item.description}
-            </p>
-          )}
-        </div>
-      </label>
-    </li>
   )
 }

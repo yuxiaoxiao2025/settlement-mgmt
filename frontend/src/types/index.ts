@@ -61,6 +61,20 @@ export interface ProjectCreatePayload {
   selected_template_seqs?: number[] | null
 }
 
+/**
+ * 新建项目两步流程中，第 1 步（/projects/new）→ 第 2 步（/projects/new/template）传递的草稿。
+ * 通过 react-router 的 location.state 传递（不持久化，刷新即丢）。
+ */
+export interface ProjectBasicInfo {
+  name: string
+  handover_date: string | null
+  deadline: string
+  construction_unit: string | null
+  handover_person: string | null
+  receiving_unit: string | null
+  receiving_person: string | null
+}
+
 /** PATCH /api/projects/{id} 请求体 — 全部 optional */
 export interface ProjectUpdatePayload {
   name?: string
