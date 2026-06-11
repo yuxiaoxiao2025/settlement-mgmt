@@ -16,7 +16,12 @@ os.environ.setdefault("ACCESS_LOG", "false")
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _REAL_TEMPLATE = _PROJECT_ROOT / "data" / "master_template.json"
-os.environ.setdefault("TEMPLATE_PATH", str(_REAL_TEMPLATE))
+# CI / 干净 clone：data/ 在 .gitignore，优先用 tests/fixtures 的精简版
+_FIXTURE_TEMPLATE = Path(__file__).resolve().parent / "fixtures" / "master_template.json"
+if _FIXTURE_TEMPLATE.exists():
+    os.environ.setdefault("TEMPLATE_PATH", str(_FIXTURE_TEMPLATE))
+else:
+    os.environ.setdefault("TEMPLATE_PATH", str(_REAL_TEMPLATE))
 
 
 @pytest.fixture
