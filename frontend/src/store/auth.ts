@@ -13,6 +13,7 @@
  * 注意：token 不存前端（HttpOnly cookie 自动管），所以没有 token 字段。
  */
 import { create } from 'zustand'
+import api from '@/api/client'
 
 export type AuthStatus = 'unknown' | 'authenticated' | 'unauthenticated'
 
@@ -30,7 +31,6 @@ export const useAuth = create<AuthState>((set) => ({
 
   bootstrap: async () => {
     try {
-      const { default: api } = await import('@/api/client')
       const { data } = await api.get<{ username: string }>('/auth/me')
       set({ username: data.username, status: 'authenticated' })
     } catch {
@@ -39,7 +39,6 @@ export const useAuth = create<AuthState>((set) => ({
   },
 
   login: async (req) => {
-    const { default: api } = await import('@/api/client')
     const { data } = await api.post<{ access_token: string; expires_in: number }>(
       '/auth/login',
       req,
@@ -52,7 +51,6 @@ export const useAuth = create<AuthState>((set) => ({
 
   logout: async () => {
     try {
-      const { default: api } = await import('@/api/client')
       await api.post('/auth/logout')
     } catch {
       // 忽略错误 — logout 永远"成功"
