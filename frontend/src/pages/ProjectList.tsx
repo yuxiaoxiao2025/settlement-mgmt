@@ -15,7 +15,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Plus, RefreshCw, AlertCircle, FolderOpen } from 'lucide-react'
 
-import { useProjects, useProjectsAggregate } from '@/hooks/useProjects'
+import { useProjects, useProjectsAggregate, useDeleteProject } from '@/hooks/useProjects'
 import { ProjectCard } from '@/components/ProjectCard'
 import { useAppStore } from '@/store/app'
 import { formatDate } from '@/lib/format'
@@ -37,12 +37,26 @@ export default function ProjectList() {
     return data.filter((p) => p.status === filter)
   }, [data, filter])
 
+  // 删除项目 mutation
+  const deleteProject = useDeleteProject()
+
   const handleRefresh = async () => {
     try {
       await refetch()
     } catch (e) {
       const msg = e instanceof Error ? e.message : '刷新失败'
       pushToast('error', `刷新失败：${msg}`)
+    }
+  }
+
+  const handleDelete = async (project: Project) => {
+    try {
+      await deleteProject.mutateAsync(project.id)
+      pushToast('success', `项目「${project.name}」已删除`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '删除失败'
+      pushToast('error', `删除失败：${msg}`)
+      throw e
     }
   }
 
@@ -142,7 +156,10 @@ export default function ProjectList() {
         >
           {filtered.map((p) => (
             <li key={p.id}>
-              <ProjectCard project={p} />
+              <ProjectCard
+                project={p}
+                onDelete={handleDelete}
+              />
             </li>
           ))}
         </ul>

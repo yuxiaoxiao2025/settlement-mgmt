@@ -14,14 +14,17 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, Download, FileText, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, Eye, FileText, Loader2, RefreshCw } from 'lucide-react';
 import {
   previewSettlement,
   buildSettlement,
   getSettlementStatus,
   downloadSettlement,
+  downloadSettlementUrl,
+  previewSettlementUrl,
 } from '../api/settlement';
 import { getProject } from '../api/projects';
+import { FilePreviewModal } from '../components/FilePreviewModal';
 import { useAppStore } from '../store/app';
 import type { Project, SettlementPreview, SettlementJob } from '../types';
 
@@ -46,6 +49,7 @@ export default function Settlement() {
   const [job, setJob] = useState<SettlementJob | null>(null);
   const [phase, setPhase] = useState<BuildPhase>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
 
   // 轮询控制
   const pollTimerRef = useRef<number | null>(null);
@@ -169,6 +173,11 @@ export default function Settlement() {
     downloadSettlement(projectId, filename);
   }, [projectId, project, job]);
 
+  // 点预览（在弹窗里打开）
+  const handlePreview = useCallback(() => {
+    setShowPreviewModal(true);
+  }, []);
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex items-center gap-3">
@@ -185,6 +194,11 @@ export default function Settlement() {
         {project && (
           <p className="mt-1 text-sm text-gray-500">
             项目：<span className="font-medium text-gray-700">{project.name}</span>
+            {project.status === 'archived' && (
+              <span className="ml-2 rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">
+                已归档
+              </span>
+            )}
           </p>
         )}
       </header>
@@ -197,7 +211,19 @@ export default function Settlement() {
         onBuild={handleBuild}
         onRetry={handleRetry}
         onDownload={handleDownload}
+        onPreview={handlePreview}
       />
+
+      {/* 结算书 PDF 预览弹窗 */}
+      {showPreviewModal && projectId && (
+        <FilePreviewModal
+          onClose={() => setShowPreviewModal(false)}
+          previewUrl={previewSettlementUrl(projectId)}
+          downloadUrl={downloadSettlementUrl(projectId)}
+          filename={job?.output_path?.split(/[/\\]/).pop() ?? `结算书_${project?.name ?? projectId}.pdf`}
+          isPdf={true}
+        />
+      )}
     </div>
   );
 }
@@ -212,6 +238,7 @@ interface ReadinessCardProps {
   onBuild: () => void;
   onRetry: () => void;
   onDownload: () => void;
+  onPreview: () => void;
 }
 
 function ReadinessCard({
@@ -222,6 +249,7 @@ function ReadinessCard({
   onBuild,
   onRetry,
   onDownload,
+  onPreview,
 }: ReadinessCardProps) {
   const isLoading = phase === 'previewing' || phase === 'building';
   const showMissing = phase !== 'building' && preview && !preview.ready;
@@ -291,16 +319,26 @@ function ReadinessCard({
           </button>
         )}
 
-        {/* 下载按钮 */}
+        {/* 预览 / 下载按钮 */}
         {phase === 'success' && (
-          <button
-            type="button"
-            onClick={onDownload}
-            className="inline-flex items-center gap-2 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700"
-          >
-            <Download className="h-4 w-4" />
-            下载结算书
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={onPreview}
+              className="inline-flex items-center gap-2 rounded-md border border-blue-600 bg-white px-4 py-2 text-sm font-medium text-blue-600 shadow-sm hover:bg-blue-50"
+            >
+              <Eye className="h-4 w-4" />
+              预览结算书
+            </button>
+            <button
+              type="button"
+              onClick={onDownload}
+              className="inline-flex items-center gap-2 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700"
+            >
+              <Download className="h-4 w-4" />
+              下载结算书
+            </button>
+          </>
         )}
 
         {/* 重试按钮 */}

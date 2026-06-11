@@ -55,8 +55,8 @@ if errorlevel 1 (
 echo.
 echo ========================================
 echo   启动成功！
-echo   浏览器打开: http://localhost
-echo   后端直连:   http://localhost:8000/api/health
+echo   浏览器打开: http://localhost:18080
+echo   后端直连:   http://localhost:18000/api/health
 echo   查日志:     docker compose logs -f
 echo   停服务:     docker compose down
 echo ========================================
@@ -64,6 +64,6 @@ echo.
 
 REM 6) 拉起浏览器（5s 后异步）
 timeout /t 3 /nobreak >nul
-start http://localhost
+start http://localhost:18080
 
 endlocal

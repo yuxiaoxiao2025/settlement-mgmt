@@ -161,3 +161,40 @@ def test_settlement_output_in_final_dir(client, settings, make_pdf):
     assert settings.PROJECTS_DIR in out.parents
     assert out.parent.name == "final"
     assert pid in str(out)
+
+
+# ============ preview-pdf（inline） ============
+
+def test_preview_pdf_after_build_returns_pdf_inline(
+    client, settings, make_pdf
+):
+    """build 成功后 /preview-pdf 应返回 application/pdf 且 Content-Disposition: inline。"""
+    p = _create_project(client, "预览测试")
+    pid = p["id"]
+    items = client.get(f"/api/projects/{pid}/items").json()["items"]
+    _upload_and_confirm_all(client, settings, pid, items, make_pdf)
+    client.post(f"/api/projects/{pid}/settlement/build")
+    r = client.get(f"/api/projects/{pid}/settlement/preview-pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert "inline" in r.headers.get("content-disposition", "").lower()
+    assert r.content[:4] == b"%PDF"
+
+
+def test_preview_pdf_before_build_returns_404(client):
+    p = _create_project(client, "未build预览")
+    pid = p["id"]
+    r = client.get(f"/api/projects/{pid}/settlement/preview-pdf")
+    assert r.status_code == 404
+
+
+def test_download_remains_attachment(client, settings, make_pdf):
+    """download 仍用 attachment（不破坏既有下载行为）。"""
+    p = _create_project(client, "下载测试")
+    pid = p["id"]
+    items = client.get(f"/api/projects/{pid}/items").json()["items"]
+    _upload_and_confirm_all(client, settings, pid, items, make_pdf)
+    client.post(f"/api/projects/{pid}/settlement/build")
+    r = client.get(f"/api/projects/{pid}/settlement/download")
+    assert r.status_code == 200
+    assert "attachment" in r.headers.get("content-disposition", "").lower()

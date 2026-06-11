@@ -65,6 +65,10 @@ def build(
         log = settlement_builder.build_settlement(db, project_id, client_ip)
     except Exception as e:
         raise HTTPException(500, f"生成失败: {e}")
+
+    # 注：归档是**手动**动作，由用户在项目详情页点「归档项目」按钮触发。
+    # 见 POST /api/projects/{id}/archive。
+
     return SettlementJobResponse(
         job_id=log.id,
         status=log.status,
@@ -76,8 +80,8 @@ def build(
     )
 
 
-@router.get("/download")
-def download(project_id: str, db: Session = Depends(get_db)):
+def _find_latest_pdf(db: Session, project_id: str) -> Path:
+    """从 settlement_logs 取最新一个 success 的 PDF 路径。"""
     log = (
         db.query(SettlementLog)
         .filter(SettlementLog.project_id == project_id, SettlementLog.status == "success")
@@ -89,4 +93,23 @@ def download(project_id: str, db: Session = Depends(get_db)):
     p = Path(log.output_path)
     if not p.exists():
         raise HTTPException(404, "文件不存在")
+    return p
+
+
+@router.get("/download")
+def download(project_id: str, db: Session = Depends(get_db)):
+    """下载结算书 PDF（attachment 头，浏览器触发下载）"""
+    p = _find_latest_pdf(db, project_id)
     return FileResponse(str(p), filename=p.name, content_disposition_type="attachment")
+
+
+@router.get("/preview-pdf")
+def preview_pdf(project_id: str, db: Session = Depends(get_db)):
+    """预览结算书 PDF（inline 头，浏览器内嵌显示）"""
+    p = _find_latest_pdf(db, project_id)
+    return FileResponse(
+        str(p),
+        filename=p.name,
+        content_disposition_type="inline",
+        media_type="application/pdf",
+    )

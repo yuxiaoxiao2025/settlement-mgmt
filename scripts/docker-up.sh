@@ -40,8 +40,8 @@ docker compose up -d --build
 echo
 echo "========================================"
 echo "  启动成功！"
-echo "  浏览器打开: http://localhost"
-echo "  后端直连:   http://localhost:8000/api/health"
+echo "  浏览器打开: http://localhost:18080"
+echo "  后端直连:   http://localhost:18000/api/health"
 echo "  查日志:     docker compose logs -f"
 echo "  停服务:     docker compose down"
 echo "========================================"
@@ -50,7 +50,7 @@ echo
 # 6) 拉起浏览器
 sleep 3
 if command -v open >/dev/null 2>&1; then
-    open http://localhost
+    open http://localhost:18080
 elif command -v xdg-open >/dev/null 2>&1; then
-    xdg-open http://localhost
+    xdg-open http://localhost:18080
 fi

@@ -58,7 +58,7 @@ export async function getSettlementStatus(projectId: string): Promise<Settlement
 }
 
 /**
- * 下载结算书的相对 URL（走 Vite 代理 /api → :8000）。
+ * 下载结算书的相对 URL（走 Vite 代理 /api → :18000 / docker nginx :18000 反代 → backend:18000）。
  *
  * 浏览器原生 <a> / window.open 即可触发流式下载，不在内存里加载整个 PDF。
  * 注意：相对路径（不带 /api 前缀），因为目标在 apiClient baseURL 之下；
@@ -66,6 +66,15 @@ export async function getSettlementStatus(projectId: string): Promise<Settlement
  */
 export function downloadSettlementUrl(projectId: string): string {
   return `/api/projects/${encodeURIComponent(projectId)}/settlement/download`;
+}
+
+/**
+ * 预览结算书 PDF 的相对 URL（inline 头，浏览器内嵌显示）。
+ *
+ * 与 download 不同：后端返回 Content-Disposition: inline，浏览器用 pdf.js / <iframe> 直接渲染。
+ */
+export function previewSettlementUrl(projectId: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/settlement/preview-pdf`;
 }
 
 /**

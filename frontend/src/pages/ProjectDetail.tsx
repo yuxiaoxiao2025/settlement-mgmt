@@ -11,6 +11,8 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
+import { useState } from 'react';
+import { Archive } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useProjectDeadline } from '../hooks/useDeadlineStatus';
 import {
@@ -19,9 +21,12 @@ import {
  useRejectItem,
  useResetItem,
 } from '../hooks/useItems';
+import { useArchiveProject } from '@/hooks/useProjects';
 import { ItemRow } from '../components/ItemRow';
 import { StatusBadge } from '../components/StatusBadge';
 import { UnclaimedFiles } from '../components/UnclaimedFiles';
+import { ConfirmModal } from '../components/ConfirmModal';
+import { useAppStore } from '@/store/app';
 import { formatDate } from '../lib/format';
 import type { Project } from '../types';
 
@@ -36,6 +41,10 @@ function ProjectDetail() {
  const confirmMut = useConfirmItem(id);
  const rejectMut = useRejectItem(id);
  const resetMut = useResetItem(id);
+ const archiveMut = useArchiveProject();
+ const pushToast = useAppStore((s) => s.pushToast);
+ const [showArchiveModal, setShowArchiveModal] = useState(false);
+ const [archiveError, setArchiveError] = useState<string | null>(null);
 
  const isMutating =
  confirmMut.isPending || rejectMut.isPending || resetMut.isPending;
@@ -71,10 +80,25 @@ function ProjectDetail() {
 
  const progress = project.progress;
  const totalCount = progress.total;
+ const isArchived = project.status === 'archived';
 
  // 「生成结算书」按钮：所有项 MUST confirmed
  const allConfirmed =
  progress.confirmed === totalCount && totalCount >0;
+
+ // 归档操作
+ const handleArchive = async () => {
+  setArchiveError(null);
+  try {
+   await archiveMut.mutateAsync(id);
+   setShowArchiveModal(false);
+   pushToast('success', '项目已归档');
+  } catch (e) {
+   const msg = e instanceof Error ? e.message : '归档失败';
+   setArchiveError(msg);
+   pushToast('error', `归档失败：${msg}`);
+  }
+ };
 
  return (
  <div className="max-w-6xl mx-auto px-4 py-6">
@@ -123,43 +147,89 @@ function ProjectDetail() {
  </div>
  </div>
 
- {/* 操作按钮 */}
- <div className="mt-4 flex gap-2 flex-wrap">
- <Link
- to={`/projects/${id}/edit`}
- className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-white"
- >
+{/* 操作按钮 */}
+<div className="mt-4 flex gap-2 flex-wrap">
+<Link
+to={`/projects/${id}/edit`}
+className={`px-3 py-1.5 text-sm border border-gray-300 rounded ${
+isArchived ? 'opacity-50 cursor-not-allowed pointer-events-none' : 'hover:bg-white'
+}`}
+aria-disabled={isArchived}
+title={isArchived ? '归档项目不可编辑' : '编辑项目元信息'}
+>
 编辑元信息
- </Link>
- <button
- type="button"
- onClick={() => itemsQuery.refetch()}
- disabled={itemsQuery.isFetching}
- className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-white disabled:opacity-50"
- >
- {itemsQuery.isFetching ? '刷新中...' : '手动刷新'}
- </button>
- <Link
- to={`/projects/${id}/settlement`}
- className={`px-3 py-1.5 text-sm rounded font-medium ${
- allConfirmed
- ? 'bg-blue-600 text-white hover:bg-blue-700'
- : 'bg-gray-200 text-gray-500 cursor-not-allowed'
- }`}
- aria-disabled={!allConfirmed}
- onClick={(e) => {
- if (!allConfirmed) e.preventDefault();
- }}
- title={
- allConfirmed
- ? '前往结算书生成页'
- : '所有资料项 MUST 已确认后才能生成结算书'
- }
- >
- 生成结算书
- </Link>
- </div>
- </header>
+</Link>
+<button
+type="button"
+onClick={() => itemsQuery.refetch()}
+disabled={itemsQuery.isFetching}
+className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-white disabled:opacity-50"
+>
+{itemsQuery.isFetching ? '刷新中...' : '手动刷新'}
+</button>
+<Link
+to={`/projects/${id}/settlement`}
+className={`px-3 py-1.5 text-sm rounded font-medium ${
+allConfirmed
+? 'bg-blue-600 text-white hover:bg-blue-700'
+: 'bg-gray-200 text-gray-500 cursor-not-allowed'
+}`}
+aria-disabled={!allConfirmed}
+onClick={(e) => {
+if (!allConfirmed) e.preventDefault();
+}}
+title={
+allConfirmed
+? '前往结算书生成页'
+: '所有资料项 MUST 已确认后才能生成结算书'
+}
+>
+生成结算书
+</Link>
+{/* 归档按钮：未归档 + 全部已确认时可用 */}
+{!isArchived && (
+<button
+type="button"
+onClick={() => {
+setArchiveError(null);
+setShowArchiveModal(true);
+}}
+disabled={!allConfirmed}
+className={`px-3 py-1.5 text-sm rounded font-medium inline-flex items-center gap-1.5 ${
+allConfirmed
+? 'bg-amber-600 text-white hover:bg-amber-700'
+: 'bg-gray-200 text-gray-500 cursor-not-allowed'
+}`}
+title={
+allConfirmed
+? '归档后项目将变为只读，不可再编辑/驳回/确认'
+: '所有资料项确认后才能归档'
+}
+>
+<Archive className="h-3.5 w-3.5" />
+归档项目
+</button>
+)}
+</div>
+</header>
+
+{/* 归档确认弹窗 */}
+{showArchiveModal && (
+<ConfirmModal
+title="归档项目？"
+description={
+archiveError
+? `归档失败：${archiveError}`
+: '归档后项目进入只读状态：不可编辑、不可驳回/确认/重置资料项、不可删除。归档动作不可撤销，但可在后续版本中解除归档。'
+}
+confirmLabel="确认归档"
+matchKeyword="归档"
+tone="primary"
+loading={archiveMut.isPending}
+onClose={() => !archiveMut.isPending && setShowArchiveModal(false)}
+onConfirm={handleArchive}
+/>
+)}
 
  {/* =============主体：25 行 ItemRow ============= */}
  <section>

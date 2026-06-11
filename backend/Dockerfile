@@ -38,12 +38,12 @@ ENV DATA_DIR=/data \
     HOST=0.0.0.0 \
     PORT=8000
 
-# 健康检查：后端 8000 /api/health
+# 健康检查：后端 18000 /api/health
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
-    CMD curl -fsS http://127.0.0.1:8000/api/health || exit 1
+    CMD curl -fsS http://127.0.0.1:18000/api/health || exit 1
 
-EXPOSE 8000
+EXPOSE 18000
 
 # tini 包装 uvicorn，正确处理 SIGTERM（docker stop）
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "18000", "--workers", "1"]
