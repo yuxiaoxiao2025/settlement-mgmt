@@ -45,7 +45,7 @@ function ProjectEdit() {
  let alive = true;
  setLoading(true);
  apiClient
- .get<Project>(`/api/projects/${encodeURIComponent(id)}`)
+ .get<Project>(`/projects/${encodeURIComponent(id)}`)
  .then(({ data }) => {
  if (!alive) return;
  setOriginal(data);

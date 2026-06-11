@@ -1,7 +1,7 @@
 # 项目结算资料管理系统
 
 > 把「项目结算资料交接清单」做成可执行的 Web 工具。
-> 模版：`项目结算资料交接清单.docx`（25 项标准资料）
+> 模版：用户提供 `项目结算资料交接清单.docx`（25 项标准资料，**不入库**，自行保管）
 >
 > 适合场景：施工/监理单位归档结算资料时，丢文件 → 自动归类 → 人工复核 → 一键合并 PDF 结算书。
 
@@ -11,7 +11,7 @@
 
 1. **创建项目** → 系统自动从模版复制 **25 项标准资料**（如「招标文件」「施工合同」「验收报告」等），并在 `projects/<id>/` 下建好对应的子文件夹。
 2. **丢文件** → 把 PDF / Word / Excel / 图片扔到对应子文件夹（或项目根目录），**3 秒内** Web 页面自动显示「已有」。
-3. **自动转码** → 非 PDF 文件（WPS 调用）转成 PDF，存到 `.pdfs/`。
+3. **在线预览** → 非 PDF 文件（docx/xlsx/txt/图片）在浏览器内直接打开预览，无需本地 Office；PDF 用内嵌 pdf.js 渲染。
 4. **人工复核** → 逐项点「确认 / 驳回」，驳回可写说明。
 5. **生成结算书** → 全 25 项都确认后，一键合并为单本 PDF（含封面 + 目录）。
 
@@ -26,7 +26,7 @@
 
 ```
 项目结算资料管理/
-├── 项目结算资料交接清单.docx   ← 25 项标准模版（不可删除）
+├── 项目结算资料交接清单.docx   ← 25 项标准模版（**用户自有，不入库**）
 ├── README.md                    ← 本文件
 ├── CLAUDE.md                    ← 开发进度（给 AI 看的）
 │
@@ -70,9 +70,9 @@
 |------|------|------|------|
 | **Python** | 3.10+ | 后端 | <https://www.python.org/downloads/> |
 | **Node.js** | 18+ | 前端 | <https://nodejs.org/> |
-| **WPS Office** | 任意 | Word/Excel → PDF 转换（**强烈建议**） | <https://www.wps.cn/> |
+| **WPS Office** | 任意 | （可选）Word/Excel → PDF 转换 | <https://www.wps.cn/> |
 
-> **WPS 不是必装** — 没装也能跑（只是非 PDF 文件不能自动转码，必须用户自己提前转好再上传）。
+> **WPS 不是必装** — 没装也能跑，所有文件都通过浏览器内嵌预览打开（docx 用 mammoth、xlsx 用 SheetJS、PDF 用 pdf.js）。
 
 ### 3.2 首次运行（Windows）
 
@@ -134,15 +134,20 @@ bash scripts/start.sh
 
 ---
 
-## 5. PDF 引擎要求
+## 5. 文件预览
 
-| 引擎 | 平台 | 说明 |
-|------|------|------|
-| **WPS Office**（推荐） | Windows / Linux | 转换速度快，排版保留好 |
-| **LibreOffice** | Linux | 备选（需改 `backend/app/services/pdf_converter.py` 把 `wps` 换成 `soffice`） |
-| 无引擎 | 任意 | 仅支持直接上传 PDF；Word/Excel 不会被自动转码 |
+文件**无需提前转码** —— 浏览器内直接打开：
 
-> 没有 WPS 也能用 — 用户必须自己把 Word/Excel 转好 PDF 再上传到对应子文件夹。
+| 文件类型 | 前端组件 | 底层库 |
+|----------|----------|--------|
+| PDF | `<iframe>` 内嵌 | pdf.js |
+| Word (docx) | HTML 转换渲染 | mammoth |
+| Excel (xlsx) | HTML 表格渲染 | SheetJS (xlsx) |
+| 图片 (jpg/png/gif/webp) | `<img>` | — |
+| 文本 (txt/md/csv/json) | `<pre>` | — |
+| 其他 | 下载提示 | — |
+
+后端 `GET /api/files/{id}/preview` 自动设置 `Content-Disposition: inline` 让浏览器打开而非下载。
 
 ---
 
@@ -246,4 +251,4 @@ bash scripts/bootstrap.sh
 
 ## 9. 许可 & 联系
 
-本项目为内部工具。技术栈：FastAPI + React + SQLite + WPS。
+本项目为内部工具。技术栈：FastAPI + React + SQLite + ReportLab（PDF 生成）+ mammoth / SheetJS / pdf.js（前端预览）。

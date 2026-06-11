@@ -14,7 +14,8 @@
 import { useState } from 'react';
 import type { FileInfo } from '../types';
 import { formatFileSize, formatDateTime } from '../lib/format';
-import { deleteFile, downloadFile, previewFileUrl, setPrimaryFile } from '../api/files';
+import { deleteFile, downloadFile, downloadFileUrl, setPrimaryFile } from '../api/files';
+import { FilePreviewModal } from './FilePreviewModal';
 
 interface FileListProps {
  itemId: string;
@@ -24,78 +25,96 @@ interface FileListProps {
 }
 
 export function FileList({ itemId, files, onChanged }: FileListProps) {
+ const [previewFile, setPreviewFile] = useState<FileInfo | null>(null);
+
  if (files.length ===0) {
  return (
  <div className="text-sm text-gray-400 italic py-2 pl-4">
-暂无文件
+ 暂无文件
  </div>
  );
  }
 
  return (
- <ul className="divide-y divide-gray-100 border-l-2 border-gray-100 ml-4 pl-4 mt-1">
+ <>{/* 预览弹窗（顶部挂载，所有子 file 共享）*/}
+ {previewFile && (
+ <FilePreviewModal
+ previewUrl={`/api/files/${previewFile.id}/preview`}
+ downloadUrl={downloadFileUrl(previewFile.id)}
+ filename={previewFile.filename}
+ isPdf={previewFile.is_pdf}
+ onClose={() => setPreviewFile(null)}
+ />
+ )}
+ <ul className="divide-y divide-gray-100 pl-4">
  {files.map((f) => (
  <FileRow
  key={f.id}
- itemId={itemId}
  file={f}
+ itemId={itemId}
  onChanged={onChanged}
+ onPreview={() => setPreviewFile(f)}
  />
  ))}
  </ul>
+ </>
  );
-}
+ }
 
-interface FileRowProps {
- itemId: string;
+
+function FileRow({
+ file,
+ itemId,
+ onChanged,
+ onPreview,
+}: {
  file: FileInfo;
+ itemId: string;
  onChanged?: () => void;
-}
+ onPreview: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-function FileRow({ itemId, file, onChanged }: FileRowProps) {
- const [busy, setBusy] = useState<null | 'delete' | 'primary'>(null);
- const [err, setErr] = useState<string | null>(null);
+  async function handleDelete() {
+  if (!window.confirm(`确认删除文件 ${file.filename} ？\n（仅从清单移除，物理文件保留在磁盘）`)) {
+  return;
+  }
+  setBusy('delete');
+  setErr(null);
+  try {
+  await deleteFile(file.id);
+  onChanged?.();
+  } catch (e) {
+  setErr(e instanceof Error ? e.message : '删除失败');
+  } finally {
+  setBusy(null);
+  }
+  }
 
- async function handleDelete() {
- if (!window.confirm(`确认删除文件 ${file.filename} ？\n（仅从清单移除，物理文件保留在磁盘）`)) {
- return;
- }
- setBusy('delete');
- setErr(null);
- try {
- await deleteFile(file.id);
- onChanged?.();
- } catch (e) {
- setErr(e instanceof Error ? e.message : '删除失败');
- } finally {
- setBusy(null);
- }
- }
+  async function handleSetPrimary() {
+  if (
+  !window.confirm(
+  `将 ${file.filename} 设为主文件？\n⚠️ 当前实现会同时把此资料项标记为已确认。`,
+  )
+  ) {
+  return;
+  }
+  setBusy('primary');
+  setErr(null);
+  try {
+  await setPrimaryFile(itemId, file.id);
+  onChanged?.();
+  } catch (e) {
+  setErr(e instanceof Error ? e.message : '设为主文件失败');
+  } finally {
+  setBusy(null);
+  }
+  }
 
- async function handleSetPrimary() {
- if (
- !window.confirm(
- `将 ${file.filename} 设为主文件？\n⚠️ 当前实现会同时把此资料项标记为已确认。`,
- )
- ) {
- return;
- }
- setBusy('primary');
- setErr(null);
- try {
- await setPrimaryFile(itemId, file.id);
- onChanged?.();
- } catch (e) {
- setErr(e instanceof Error ? e.message : '设为主文件失败');
- } finally {
- setBusy(null);
- }
- }
-
- function handlePreview() {
- //浏览器原生新 tab打开 PDF 流
- window.open(previewFileUrl(file.id), '_blank', 'noopener,noreferrer');
- }
+  function handlePreview() {
+  onPreview();
+  }
 
  function handleDownload() {
  downloadFile(file.id, file.filename);

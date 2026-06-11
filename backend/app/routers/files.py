@@ -58,7 +58,20 @@ def preview_file(file_id: str, db: Session = Depends(get_db)):
     p = Path(f.pdf_path or f.original_path)
     if not p.exists():
         raise HTTPException(404, "物理文件不存在")
-    return FileResponse(str(p), filename=f.filename, media_type="application/pdf" if f.is_pdf else "application/octet-stream")
+    # content_disposition_type="inline" 让浏览器内置阅读器直接打开 PDF，而不是下载
+    # 非 PDF 文件（docx/xlsx）回退为下载，因为浏览器无法 inline 渲染
+    if f.is_pdf:
+        return FileResponse(
+            str(p),
+            filename=f.filename,
+            media_type="application/pdf",
+            content_disposition_type="inline",
+        )
+    return FileResponse(
+        str(p),
+        filename=f.filename,
+        media_type="application/octet-stream",
+    )
 
 
 @router.get("/api/files/{file_id}/download")

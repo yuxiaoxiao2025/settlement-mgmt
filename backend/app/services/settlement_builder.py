@@ -11,7 +11,6 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import cm
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from pypdf import PdfReader, PdfWriter
 
 from app.config import settings
@@ -19,12 +18,48 @@ from app.core.paths import safe_join
 from app.models import Project, Item, File, SettlementLog
 
 
-# 注册中文字体（用 reportlab 内置的 STSong-Light）
-try:
-    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
-    CHINESE_FONT = "STSong-Light"
-except Exception:
-    CHINESE_FONT = "Helvetica"
+# 中文字体：正文宋体（SimSun），标题黑体（SimHei）
+# Windows 系统字体；非 Windows 平台回退到内置 STSong-Light
+def _register_cn_fonts() -> tuple[str, str]:
+    """注册中文字体，返回 (body_font, heading_font)。"""
+    if sys.platform.startswith("win"):
+        candidates = [
+            ("SimSun", r"C:\Windows\Fonts\simsun.ttc"),
+            ("SimHei", r"C:\Windows\Fonts\simhei.ttf"),
+        ]
+    else:
+        # Linux/macOS: 尝试常见路径
+        candidates = [
+            ("SimSun", "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+            ("SimHei", "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+        ]
+    body_font = "Helvetica"
+    heading_font = "Helvetica-Bold"
+    for name, path in candidates:
+        if Path(path).exists():
+            try:
+                pdfmetrics.registerFont(TTFont(name, path))
+                if name == "SimSun":
+                    body_font = "SimSun"
+                elif name == "SimHei":
+                    heading_font = "SimHei"
+            except Exception as e:
+                print(f"[FONT] 注册 {name} 失败: {e}")
+    # 如果 SimSun 注册失败，回退到 reportlab 内置 CID 字体
+    if body_font == "Helvetica":
+        try:
+            from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+            pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+            body_font = "STSong-Light"
+        except Exception:
+            pass
+    return body_font, heading_font
+
+
+import sys  # noqa: E402
+
+CHINESE_FONT, HEADING_FONT = _register_cn_fonts()
+print(f"[FONT] 结算书字体：正文={CHINESE_FONT}, 标题={HEADING_FONT}")
 
 
 # 每个 TOC 页能容纳的条目数（A4 / 0.6cm 行高 ≈ 38 条/页，保守取 35）
@@ -43,16 +78,16 @@ def _draw_cover(c: canvas.Canvas, project: Project, total_pages: int) -> int:
     """绘制封面页，返回页数（通常 1）。"""
     width, height = A4
 
-    # 标题
-    c.setFont(CHINESE_FONT, 24)
+    # 标题（黑体，加粗）
+    c.setFont(HEADING_FONT, 28)
     title = project.name or "未命名项目"
     c.drawCentredString(width / 2, height - 4 * cm, title)
 
-    # 副标题
-    c.setFont(CHINESE_FONT, 18)
+    # 副标题（黑体）
+    c.setFont(HEADING_FONT, 20)
     c.drawCentredString(width / 2, height - 6 * cm, "项目结算资料交接清单")
 
-    # 元信息
+    # 元信息（宋体）
     c.setFont(CHINESE_FONT, 12)
     info_lines = [
         f"移交日期：{project.handover_date.isoformat() if project.handover_date else '—'}",
@@ -80,7 +115,7 @@ def _draw_toc(c: canvas.Canvas, items: List[Tuple[Item, int]]) -> int:
     返回生成的页数。
     """
     width, height = A4
-    c.setFont(CHINESE_FONT, 16)
+    c.setFont(HEADING_FONT, 18)  # 目录标题用黑体
     c.drawString(2 * cm, height - 2 * cm, "目录")
 
     c.setFont(CHINESE_FONT, 10)

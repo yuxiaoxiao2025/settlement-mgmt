@@ -1,0 +1,79 @@
+# 临时锁文件
+~$*.docx
+~$*.xlsx
+~$*.pptx
+
+# 用户原始资料（不入库，由用户自行保管）
+/项目结算资料交接清单.docx
+/*.docx
+!docs/**/*.docx
+!scripts/**/*.docx
+
+# 依赖
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.venv-*/
+venv-*/
+*.egg-info/
+dist/
+build/
+
+# 数据库（运行时数据，不入库）
+data/*.db
+data/*.db-journal
+data/*.log
+data/server.log
+data/uploads/
+
+# 业务运行时数据（不入库）
+projects/
+data/
+master_template*.json
+
+# Mavis / OpenCode 内部状态
+.mavis/
+.opencode/
+.mavis-trash/
+*.swp
+*.swo
+*~
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# 测试产物
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+*.lcov
+.nyc_output/
+
+# 临时脚本 / 决策文件
+decision-*.json
+test_*.py
+scratch_*.py
+
+# 敏感 / 本地配置
+.env
+.env.local
+*.local
+
+# Frontend
+frontend/dist/
+frontend/.vite/
+frontend/tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Playwright 错误日志泄到文件系统的残留
+{
+"{
+*.error.log
+mcp-error-*.log
