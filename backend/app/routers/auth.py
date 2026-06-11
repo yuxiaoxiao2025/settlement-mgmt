@@ -38,7 +38,9 @@ router = APIRouter(tags=["auth"])
 JWT_ALGO = "HS256"
 JWT_AUD = "settlement-mgmt"
 JWT_ISS = "settlement-mgmt-auth"
-JWT_EXPIRE_HOURS = 12  # 短一点，公网风险更高
+# H1: 不再 hard-code 12 — 从 settings 读（默认 12h；.env 可覆盖）
+# 注：.env 里 JWT_EXPIRE_HOURS=24 是用户配置，但默认 12h 是公网安全底线
+JWT_EXPIRE_HOURS_DEFAULT = 12
 
 # Cookie 名（前端 axios 不会自动带，必须前端显式 withCredentials=true）
 COOKIE_NAME = "sm_auth"
@@ -50,7 +52,9 @@ limiter = Limiter(key_func=get_remote_address)
 # ── Schemas ──
 class LoginReq(BaseModel):
     username: Annotated[str, Field(min_length=1, max_length=64)]
-    password: Annotated[str, Field(min_length=1, max_length=128)]
+    # H3: min_length=8 — 与生成密码一致；slowapi 是 IP-level（多机可绕），
+    #     最低长度是最后一道防线
+    password: Annotated[str, Field(min_length=8, max_length=128)]
     verification_code: Annotated[str, Field(min_length=4, max_length=32)]
 
 
@@ -82,22 +86,58 @@ def _secrets() -> tuple[str, str, str, str]:
 
 
 def _normalize_code(code: str) -> str:
-    """验证码规范化：去空白 + upper，方便用户输入 '0fal-mf9v-yl9a-5nd2' 也能过。"""
-    return "".join(code.split()).upper()
+    """验证码规范化：去空白 + 去横线 + upper。
+
+    接受用户输入任何形式：
+      '0FAL-MF9V-YL9A-5ND2' / '0falmf9vyl9a5nd2' / ' 0FAL MF9V YL9A 5ND2 '
+    都规范化成同一形式 '0FALMF9VYL9A5ND2'。
+    """
+    return "".join(code.split()).replace("-", "").upper()
+
+
+# ── 启动时一次性：明文密码 → bcrypt 缓存 ─────────────────────────
+# H2 简化版：.env 里仍允许明文 ADMIN_PASSWORD（方便用户），启动时自动 hash 一次
+# 后续比对都用 hash。这样部署方不需要懂 bcrypt，但内存里始终是 hash。
+_admin_password_hash_cache: str | None = None
+
+
+def _get_admin_password_hash() -> str:
+    """返回 admin 密码的 bcrypt hash。首次调用时把明文 hash 一次。"""
+    global _admin_password_hash_cache
+    if _admin_password_hash_cache is not None:
+        return _admin_password_hash_cache
+
+    _, admin_pwd, _, _ = _secrets()
+
+    if admin_pwd.startswith("$2"):
+        # 已经是 hash
+        _admin_password_hash_cache = admin_pwd
+    else:
+        # 明文 → 现场 hash（一次性）
+        logger.warning(
+            "ADMIN_PASSWORD in .env is plaintext (not a bcrypt hash starting with $2). "
+            "Auto-hashing once for this process. "
+            "Recommended: replace with a bcrypt hash for git-safety — "
+            "python -c \"from passlib.hash import bcrypt; import sys; print(bcrypt.hash(sys.argv[1]))\" YOUR_PASSWORD"
+        )
+        _admin_password_hash_cache = bcrypt.hashpw(
+            admin_pwd.encode("utf-8"), bcrypt.gensalt(rounds=12)
+        ).decode("utf-8")
+
+    return _admin_password_hash_cache
 
 
 def _verify_password(plain: str, stored: str) -> bool:
-    # 支持明文（生成的随机密码）和 bcrypt 哈希（运维手动 hash 过的）
-    if stored.startswith("$2"):
-        try:
-            return bcrypt.checkpw(plain.encode("utf-8"), stored.encode("utf-8"))
-        except Exception:
-            return False
-    return hmac.compare_digest(plain.encode("utf-8"), stored.encode("utf-8"))
+    """H2: 用 bcrypt 验证。stored 始终是 hash（启动时一次性转换）。"""
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), stored.encode("utf-8"))
+    except Exception:
+        return False
 
 
 def _mint_token(username: str, secret: str) -> tuple[str, datetime]:
-    exp = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HOURS)
+    hours = getattr(settings, "JWT_EXPIRE_HOURS", JWT_EXPIRE_HOURS_DEFAULT) or JWT_EXPIRE_HOURS_DEFAULT
+    exp = datetime.now(timezone.utc) + timedelta(hours=hours)
     payload = {
         "sub": username,
         "aud": JWT_AUD,
@@ -195,8 +235,8 @@ def login(
         _audit(False, request, req.username)
         raise HTTPException(status_code=401, detail="invalid credentials")
 
-    # 2. 用户名 + 密码（统一错误信息防枚举）
-    if req.username != admin_user or not _verify_password(req.password, admin_pwd):
+    # 2. 用户名 + 密码（统一错误信息防枚举；H2 走 bcrypt 缓存）
+    if req.username != admin_user or not _verify_password(req.password, _get_admin_password_hash()):
         _audit(False, request, req.username)
         raise HTTPException(status_code=401, detail="invalid credentials")
 
@@ -206,16 +246,17 @@ def login(
 
     # 同时设置 HttpOnly Secure cookie（生产环境 behind nginx 应有 HTTPS）
     # secure=True 在 HTTP 环境会被浏览器忽略，所以测试时也工作；生产环境反正走 HTTPS
+    cookie_max_age = (getattr(settings, "JWT_EXPIRE_HOURS", JWT_EXPIRE_HOURS_DEFAULT) or JWT_EXPIRE_HOURS_DEFAULT) * 3600
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         httponly=True,
         secure=True,  # 公网部署默认开；如需 HTTP 测试可临时改为 False
         samesite="lax",  # 防 CSRF；strict 会破坏 OAuth/redirect 流程
-        max_age=JWT_EXPIRE_HOURS * 3600,
+        max_age=cookie_max_age,
         path="/",
     )
-    return TokenResp(access_token=token, expires_in=JWT_EXPIRE_HOURS * 3600)
+    return TokenResp(access_token=token, expires_in=cookie_max_age)
 
 
 @router.post("/api/auth/logout", status_code=204)

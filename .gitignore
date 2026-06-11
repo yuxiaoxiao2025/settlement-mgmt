@@ -87,3 +87,6 @@ projects/
 "{
 *.error.log
 mcp-error-*.log
+
+# Dogfood QA outputs (审查报告 + 截图)
+dogfood-output/

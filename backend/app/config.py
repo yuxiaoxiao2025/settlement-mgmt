@@ -39,9 +39,11 @@ class Settings(BaseSettings):
     # ── Auth (v0.3.1+ 公网部署 — see .env) ──
     # 详见 app/routers/auth.py：三件套登录 + JWT (aud/iss 校验) + HttpOnly cookie
     ADMIN_USERNAME: str = ""
-    ADMIN_PASSWORD: str = ""
+    ADMIN_PASSWORD: str = ""  # H2: 必须是 bcrypt 哈希 ($2 开头)
     SITE_VERIFICATION_CODE: str = ""
     JWT_SECRET: str = ""
+    # H1: 从 .env 读取 token 过期小时数（默认12h — 公网安全底线）
+    JWT_EXPIRE_HOURS: int = 12
 
     model_config = SettingsConfigDict(
         env_file=".env",
