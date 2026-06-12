@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.paths import is_in_subfolder
+from app.core.paths import is_in_subfolder, project_id_from_path
 from app.core.matching import match_best
 from app.models import Item, File
 from app.services.pdf_converter import convert_to_pdf
@@ -38,20 +38,6 @@ def _to_relative_path(project_id: str, file_path: Path) -> str:
         return "/".join(abs_parts[-len(proj_parts) + len(proj_parts):])
     # 实在不行只取 basename
     return abs_path.name
-
-
-# 修 B-03：从 file_path 推断 project_id（remove_path 不收 project_id 参数的兼容方案）
-def _project_id_from_path(file_path: Path) -> str | None:
-    """从 file_path 推断所属 project_id。
-
-    假设路径形如 .../projects/{proj_id}/... 或 E:\\...\\projects\\{proj_id}\\...
-    找不到就返回 None（caller 走绝对路径兜底）。
-    """
-    parts = PureWindowsPath(str(file_path)).parts
-    for i, p in enumerate(parts):
-        if p == "projects" and i + 1 < len(parts):
-            return parts[i + 1]
-    return None
 
 
 def _try_convert_to_pdf(
@@ -216,8 +202,8 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
 
 def remove_path(db: Session, file_path: Path) -> None:
     """文件删除：同步从 files 表移除，可能回退 item 状态。"""
-    # 修 B-03：推断 project_id 后存项目相对路径
-    project_id = _project_id_from_path(file_path)
+    # 修 B-03 + I-1：用 core 的 project_id_from_path（settings.PROJECTS_DIR 显式传）
+    project_id = project_id_from_path(file_path, settings.PROJECTS_DIR)
     if project_id:
         rel_path = _to_relative_path(project_id, file_path)
     else:

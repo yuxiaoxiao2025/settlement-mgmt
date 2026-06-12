@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.paths import safe_join
+from app.core.paths import safe_join, resolve_file_path, project_id_from_path
 from app.core.template_loader import _sanitize_name
 from app.database import get_db
 from app.models import File, Item
@@ -18,62 +18,17 @@ from app.services.file_service import ingest_path
 router = APIRouter(tags=["files"])
 
 
-# 修 B-03：统一路径解析（替代分散的 Path(f.original_path)）
-# 优先级：
-#   1) pdf_path 优先（合并 PDF）— 运行时绝对路径
-#   2) original_path 已经是绝对路径且存在 — 兼容历史数据
-#   3) original_path 当项目相对路径拼 — 标准形态
-#   4) 跨平台兜底（PureWindowsPath.basename + 全项目 rglob 一次）
+# 修 C-1 / C-2：从 File 记录解析运行时绝对路径的统一入口
+# 委托给 app.core.paths.resolve_file_path（shared by routers/files.py + services/settlement_builder.py）
 def _resolve_file_path(f: "File", prefer_pdf: bool = False) -> Path | None:
-    """解析 File 记录的运行时绝对路径。prefer_pdf=True 优先用 pdf_path。"""
-    if not f.item_id:
-        # orphan / _unclaimed：没 item 关系，original_path 是项目内相对或绝对
-        p = Path(f.pdf_path if prefer_pdf and f.pdf_path else f.original_path)
-        if p.is_absolute() and p.exists():
-            return p
-        return None
-
-    item = f.item
-    if not item:
-        return None
-    proj_id = item.project_id
-
-    # 1) prefer_pdf
-    if prefer_pdf and f.pdf_path:
-        p = Path(f.pdf_path)
-        if p.exists():
-            return p
-
-    # 2) original_path 是绝对且存在
-    p = Path(f.original_path)
-    if p.is_absolute() and p.exists():
-        return p
-
-    # 3) 项目相对路径
-    if not p.is_absolute():
-        candidates = [
-            settings.PROJECTS_DIR / proj_id / f"{item.seq:02d}_{_sanitize_name(item.name)}" / p.name,
-            settings.PROJECTS_DIR / proj_id / "_unclaimed" / p.name,
-            settings.PROJECTS_DIR / proj_id / str(f.original_path),  # 兼容子目录名异形
-        ]
-        for c in candidates:
-            if c.exists():
-                return c
-
-    # 4) 跨平台兜底
-    if p.is_absolute():
-        from pathlib import PureWindowsPath
-        basename = PureWindowsPath(f.original_path).name
-        if basename and proj_id:
-            folder = f"{item.seq:02d}_{_sanitize_name(item.name)}"
-            c = settings.PROJECTS_DIR / proj_id / folder / basename
-            if c.exists():
-                return c
-            proj_root = settings.PROJECTS_DIR / proj_id
-            if proj_root.exists():
-                for sub in proj_root.rglob(basename):
-                    return sub
-    return None
+    return resolve_file_path(
+        f.original_path,
+        item_seq=f.item.seq if f.item else None,
+        item_name=f.item.name if f.item else None,
+        project_id=f.item.project_id if f.item else project_id_from_path(Path(f.original_path), settings.PROJECTS_DIR),
+        pdf_path=f.pdf_path,
+        prefer_pdf=prefer_pdf,
+    )
 
 
 # 上传大小上限：200MB / 文件（PDF 合并常见大文件；够用）
