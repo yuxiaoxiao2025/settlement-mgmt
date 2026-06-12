@@ -21,6 +21,7 @@ import type { Item } from '../types';
 import { StatusBadge } from './StatusBadge';
 import { FileList } from './FileList';
 import FileDropZone from './FileDropZone';
+import { getItemActions } from '../lib/item-actions';
 
 interface ItemRowProps {
  item: Item;
@@ -60,7 +61,9 @@ export function ItemRow({
  onReset(item.id);
  }
 
- const fileCount = item.files.length;
+  const fileCount = item.files.length;
+  // 修 T-06: 状态机决策抽到 helper，纯函数测覆盖
+  const actions = getItemActions(item.status);
 
  return (
  <div className="border-b border-gray-100 last:border-b-0">
@@ -115,14 +118,14 @@ export function ItemRow({
 
   {/* 操作按钮组 ——按状态切换（SPEC §2.1 + CONTEXT-04约束） */}
   <div className="flex gap-1 flex-shrink-0 w-44 justify-end">
-  {item.status === 'pending' && (
+  {actions.showUpload && (
   <>
   <button
   type="button"
   onClick={() => setShowUpload((v) => !v)}
   disabled={disabled}
   className="px-2 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded disabled:opacity-50 inline-flex items-center gap-1"
-  title="上传文件到该项"
+  title={item.status === 'rejected' ? '驳回后可重新上传文件' : '上传文件到该项'}
   >
   <Upload className="h-3 w-3" />
   {showUpload ? '收起' : '上传'}
@@ -141,8 +144,7 @@ export function ItemRow({
   </>
   )}
 
-  {item.status === 'uploaded' && (
-  <>
+  {actions.showConfirm && (
   <button
   type="button"
   onClick={() => onConfirm(item.id)}
@@ -152,6 +154,9 @@ export function ItemRow({
   >
   复核
   </button>
+  )}
+
+  {actions.showReject && (
   <button
   type="button"
   onClick={handleReject}
@@ -160,34 +165,9 @@ export function ItemRow({
   >
   驳回
   </button>
-  </>
   )}
 
-  {item.status === 'rejected' && (
-  <>
-  <button
-  type="button"
-  onClick={() => setShowUpload((v) => !v)}
-  disabled={disabled}
-  className="px-2 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded disabled:opacity-50 inline-flex items-center gap-1"
-  title="驳回后可重新上传文件"
-  >
-  <Upload className="h-3 w-3" />
-  {showUpload ? '收起' : '上传'}
-  </button>
-  <button
-  type="button"
-  onClick={handleReset}
-  disabled={disabled}
-  className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded disabled:opacity-50"
-  title="重置为待上传"
-  >
-  重置
-  </button>
-  </>
-  )}
-
-  {item.status === 'confirmed' && (
+  {actions.showReset && (
   <button
   type="button"
   onClick={handleReset}
@@ -202,7 +182,7 @@ export function ItemRow({
   </div>
 
   {/* 修公网部署：行级上传区（pending/rejected 展开） */}
-  {showUpload && (item.status === 'pending' || item.status === 'rejected') && (
+  {showUpload && actions.showUpload && (
   <div className="pb-3 pl-10">
   <FileDropZone
   itemId={item.id}
