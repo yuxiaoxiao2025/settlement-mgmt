@@ -21,11 +21,17 @@ router = APIRouter(tags=["files"])
 # 修 C-1 / C-2：从 File 记录解析运行时绝对路径的统一入口
 # 委托给 app.core.paths.resolve_file_path（shared by routers/files.py + services/settlement_builder.py）
 def _resolve_file_path(f: "File", prefer_pdf: bool = False) -> Path | None:
+    # review Round 6 D-4: orphan File 优先用 item_id_orphan (DB 存了真 project_id)
+    # 避免 project_id_from_path 对相对 basename 返 None → rglob 兜底
+    proj_id = (
+        f.item.project_id if f.item
+        else (f.item_id_orphan or project_id_from_path(Path(f.original_path), settings.PROJECTS_DIR))
+    )
     return resolve_file_path(
         f.original_path,
         item_seq=f.item.seq if f.item else None,
         item_name=f.item.name if f.item else None,
-        project_id=f.item.project_id if f.item else project_id_from_path(Path(f.original_path), settings.PROJECTS_DIR),
+        project_id=proj_id,
         pdf_path=f.pdf_path,
         prefer_pdf=prefer_pdf,
     )
