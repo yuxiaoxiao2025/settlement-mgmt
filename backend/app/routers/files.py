@@ -10,7 +10,7 @@ from app.config import settings
 from app.core.paths import safe_join, resolve_file_path, project_id_from_path
 from app.core.template_loader import _sanitize_name
 from app.database import get_db
-from app.models import File, Item
+from app.models import File, Item, Project
 from app.schemas import FileInItem
 from app.services import file_service
 from app.services.file_service import ingest_path
@@ -202,4 +202,83 @@ async def upload_to_item(
         "size": target.stat().st_size,
         "item_id": item_id,
         "saved_to": str(target.relative_to(settings.PROJECTS_DIR.parent)),
+    }
+
+
+# 修公网部署：批量上传到项目 _unclaimed 区
+# 一次性选多个文件 → 落 /projects/{proj_id}/_unclaimed/ → ingest 走 _unclaimed 分支
+# 上传后用户从 UnclaimedFiles 区手动指派到具体 item
+@router.post("/api/projects/{project_id}/upload", status_code=201)
+async def upload_to_project(
+    project_id: str,
+    files: list[UploadFile] = FastFile(...),
+    db: Session = Depends(get_db),
+):
+    """批量上传文件到项目 _unclaimed 区（公网部署用）。
+
+    与 upload_to_item 区别：
+    - 无 item 归属，落到项目根的 _unclaimed/ 子目录
+    - 多文件（list[UploadFile]），单文件错误不影响其他
+    - 返回 uploaded[] + errors[] 让前端逐条显示状态
+    """
+    # 项目存在性 + 归档校验
+    proj = db.query(Project).filter(Project.id == project_id).first()
+    if not proj:
+        raise HTTPException(404, "项目不存在")
+    if proj.status == "archived":
+        raise HTTPException(409, "已归档项目不可上传")
+
+    # 落地到 /projects/{project_id}/_unclaimed/
+    unclaimed_dir = settings.PROJECTS_DIR / project_id / "_unclaimed"
+    unclaimed_dir.mkdir(parents=True, exist_ok=True)
+
+    uploaded: list[dict] = []
+    errors: list[dict] = []
+
+    for file in files:
+        try:
+            raw_name = file.filename or ""
+            # 走 item upload 同样的校验（防路径穿越 + 白名单 + 大小）
+            _validate_upload(raw_name, getattr(file, "size", None))
+            original = Path(raw_name).name  # 已被 _validate 校验过
+            target = unclaimed_dir / original
+            # 同名防覆盖（与 item upload 行为一致）
+            if target.exists():
+                stem, suffix = target.stem, target.suffix
+                target = unclaimed_dir / f"{stem}.{uuid.uuid4().hex[:8]}{suffix}"
+
+            # 流式写盘
+            try:
+                with target.open("wb") as out:
+                    shutil.copyfileobj(file.file, out)
+            finally:
+                file.file.close()
+
+            # 入库（_unclaimed 分支：item_id='', item_id_orphan=project_id）
+            f_obj = ingest_path(db, target)
+            db.commit()
+            uploaded.append({
+                "id": f_obj.id,
+                "filename": f_obj.filename,
+                "is_pdf": f_obj.is_pdf,
+            })
+        except HTTPException as e:
+            db.rollback()
+            errors.append({
+                "filename": file.filename or "(unknown)",
+                "status": e.status_code,
+                "detail": e.detail if isinstance(e.detail, str) else str(e.detail),
+            })
+        except Exception as e:
+            db.rollback()
+            errors.append({
+                "filename": file.filename or "(unknown)",
+                "status": 500,
+                "detail": str(e),
+            })
+
+    return {
+        "project_id": project_id,
+        "uploaded": uploaded,
+        "errors": errors,
     }
