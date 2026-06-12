@@ -85,3 +85,24 @@ def test_resolve_nonexistent_returns_none(env):
         projects_root=env,
     )
     assert p is None
+
+
+def test_resolve_orphan_no_project_id_scan_all_projects(env):
+    """修 C-1 Round 2：no project_id 时扫描 PROJECTS_DIR 全部项目找 basename。
+
+    模拟 router 调用：f.item=None, original_path='bar.pdf' (T-06 basename)
+    → project_id_from_path 返 None → 兜底走 PROJECTS_DIR.rglob
+    """
+    p = resolve_file_path("bar.pdf", project_id=None, projects_root=env)
+    assert p is not None, "should find via PROJECTS_DIR.rglob scan"
+    assert p.exists()
+    assert "unclaimed" in str(p) or p.name == "bar.pdf"
+
+
+def test_resolve_orphan_no_project_id_returns_none_if_not_in_any_project(tmp_path, monkeypatch):
+    """无 project_id + 文件不存在于任何项目 → 返 None。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "PROJECTS_DIR", tmp_path)
+    # tmp_path 是空目录
+    p = resolve_file_path("ghost.pdf", project_id=None, projects_root=tmp_path)
+    assert p is None

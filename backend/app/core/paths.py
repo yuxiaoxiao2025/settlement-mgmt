@@ -120,11 +120,10 @@ def resolve_file_path(
         # orphan 在项目根或 _unclaimed 子目录
         candidates.append(projects_root / project_id / original_path)
         candidates.append(projects_root / project_id / "_unclaimed" / p.name)
-    if item_seq is not None and item_name:
+    if item_seq is not None and item_name and project_id:
         from app.core.template_loader import _sanitize_name
         folder = f"{item_seq:02d}_{_sanitize_name(item_name)}"
-        candidates.append(projects_root / (project_id or "") / folder / original_path)
-        candidates.append(projects_root / (project_id or "") / folder / p.name)
+        candidates.append(projects_root / project_id / folder / p.name)
     for c in candidates:
         if c.exists():
             return c
@@ -148,4 +147,19 @@ def resolve_file_path(
                     if count > rglob_cap:
                         return None  # 太慢，放弃
                     return sub
+
+    # 3.5) Orphan 兜底（无 project_id 时）— 在所有项目根下找 basename
+    # review C-1 Round 2: project_id_from_path 对纯 basename 返 None
+    # → resolve_file_path 收不到 project_id 返 None → 404
+    # 兜底：扫描 PROJECTS_DIR 下所有项目，找哪个项目下有这个 basename
+    # 性能：单项目 ~25 个 item 几十个文件 OK；千文件项目仍 rglob_cap 保护
+    if not project_id and not p.is_absolute() and projects_root.exists():
+        basename = Path(original_path).name
+        if basename:
+            count = 0
+            for sub in projects_root.rglob(basename):
+                count += 1
+                if count > rglob_cap:
+                    return None
+                return sub
     return None

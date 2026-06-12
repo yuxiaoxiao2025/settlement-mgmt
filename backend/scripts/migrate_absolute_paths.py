@@ -22,7 +22,6 @@ os.environ.setdefault("JWT_SECRET", "x" * 64)
 
 from app.config import settings  # noqa: E402
 from app.services.file_service import _to_relative_path  # noqa: E402
-from app.core.paths import project_id_from_path  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models import File, Item  # noqa: E402
 
