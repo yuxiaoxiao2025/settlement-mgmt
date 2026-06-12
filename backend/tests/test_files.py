@@ -243,6 +243,71 @@ def test_unclaimed_file_in_root(client, settings, write_file):
     assert any(f["filename"] == "无主文件.pdf" for f in unclaimed)
 
 
+# 修 I-2：orphan 文件 preview/download/delete API 集成测试
+# 之前只有 resolve_file_path 单元测试覆盖 orphan 路径解析，
+# 但没有走完整 API（client → routers/files.py → _resolve_file_path → 200）
+# reviewer 警告：如果 router 端调用 resolve_file_path 时 project_id 推断失败，
+# 单元测试会通过但 API 返 404。补这三个测试。
+def test_orphan_preview_via_api(client, settings, write_file, make_pdf):
+    """修 I-2: orphan PDF preview 走 API 应当 200，不是 404。"""
+    p = _create_project(client, "orphan-preview")
+    pid = p["id"]
+    proj_dir = settings.PROJECTS_DIR / pid
+    pdf_path = proj_dir / "orphan-pdf.pdf"
+    make_pdf(pdf_path)
+    from app.services.file_service import ingest_path
+    from app.database import SessionLocal
+    s = SessionLocal()
+    try:
+        f = ingest_path(s, pdf_path)
+        fid = f.id
+    finally:
+        s.close()
+    r = client.get(f"/api/files/{fid}/preview")
+    assert r.status_code == 200, f"orphan preview 应当 200，实返 {r.status_code}: {r.text}"
+    assert r.headers.get("content-type") == "application/pdf"
+
+
+def test_orphan_download_via_api(client, settings, write_file, make_pdf):
+    """修 I-2: orphan PDF download 走 API 应当 200。"""
+    p = _create_project(client, "orphan-download")
+    pid = p["id"]
+    proj_dir = settings.PROJECTS_DIR / pid
+    pdf_path = proj_dir / "orphan-dl.pdf"
+    make_pdf(pdf_path)
+    from app.services.file_service import ingest_path
+    from app.database import SessionLocal
+    s = SessionLocal()
+    try:
+        f = ingest_path(s, pdf_path)
+        fid = f.id
+    finally:
+        s.close()
+    r = client.get(f"/api/files/{fid}/download")
+    assert r.status_code == 200
+    assert r.headers.get("content-disposition", "").startswith("attachment")
+
+
+def test_orphan_in_unclaimed_dir_api_round_trip(client, settings, write_file, make_pdf):
+    """修 I-2: 文件在 _unclaimed 子目录时，preview/download 走 API 应当 200。"""
+    p = _create_project(client, "orphan-unclaimed-rt")
+    pid = p["id"]
+    proj_dir = settings.PROJECTS_DIR / pid
+    (proj_dir / "_unclaimed").mkdir(parents=True, exist_ok=True)
+    pdf_path = proj_dir / "_unclaimed" / "in-unclaimed.pdf"
+    make_pdf(pdf_path)
+    from app.services.file_service import ingest_path
+    from app.database import SessionLocal
+    s = SessionLocal()
+    try:
+        f = ingest_path(s, pdf_path)
+        fid = f.id
+    finally:
+        s.close()
+    r = client.get(f"/api/files/{fid}/preview")
+    assert r.status_code == 200, f"orphan in _unclaimed preview 应当 200，实返 {r.status_code}"
+
+
 def test_root_dir_fuzzy_match(client, settings, make_pdf):
     """项目根目录放一个文件名与某项名近似的文件 → 应被匹配。"""
     p = _create_project(client, "根目录模糊")

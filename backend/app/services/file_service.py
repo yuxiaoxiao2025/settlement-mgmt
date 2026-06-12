@@ -1,14 +1,43 @@
 """文件服务：路径归属判断、入库。"""
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.paths import is_in_subfolder
+from app.core.paths import is_in_subfolder, project_id_from_path
 from app.core.matching import match_best
 from app.models import Item, File
 from app.services.pdf_converter import convert_to_pdf
 from app.services.project_service import get_or_load_template_items
+
+
+# 修 B-03：DB 存项目相对路径（不是运行时绝对路径）
+# 跨平台移栽（Windows venv → Docker / 不同机器）不会失效
+def _to_relative_path(project_id: str, file_path: Path) -> str:
+    """把 file_path 转为项目内相对路径，存 DB 用。
+
+    跨平台兼容：
+    - Linux: /projects/{proj_id}/01_xxx/foo.pdf → "01_xxx/foo.pdf"
+    - Windows: E:\\...\\{proj_id}\\01_xxx\\foo.pdf → "01_xxx/foo.pdf"
+    - 已经在项目内（取相对）：保持原样
+    - 完全在项目外：兜底返回 basename
+    """
+    project_root = settings.PROJECTS_DIR / project_id
+    abs_path = file_path.resolve() if file_path.exists() else file_path
+    try:
+        rel = abs_path.relative_to(project_root)
+        # 统一用正斜杠（跨平台兼容 — Windows 上 relative_to 会返回反斜杠）
+        return str(rel).replace("\\", "/")
+    except ValueError:
+        pass
+    # 跨平台兜底：按 Windows 路径前缀切
+    from pathlib import PureWindowsPath
+    proj_parts = PureWindowsPath(str(project_root)).parts
+    abs_parts = PureWindowsPath(str(abs_path)).parts
+    if len(abs_parts) >= len(proj_parts) and abs_parts[-len(proj_parts):] == proj_parts:
+        return "/".join(abs_parts[-len(proj_parts) + len(proj_parts):])
+    # 实在不行只取 basename
+    return abs_path.name
 
 
 def _try_convert_to_pdf(
@@ -85,7 +114,7 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
         # 同名覆盖
         existing = (
             db.query(File)
-            .filter(File.original_path == str(file_path.resolve()))
+            .filter(File.original_path == _to_relative_path(project_id, file_path))
             .first()
         )
         is_pdf = file_path.suffix.lower() == ".pdf"
@@ -103,8 +132,10 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
             return existing
         f = File(
             item_id="",  # orphan
+            # 修 I-4: 用 item_id_orphan 列存 project_id（list_items 不再走磁盘）
+            item_id_orphan=project_id,
             filename=file_path.name,
-            original_path=str(file_path.resolve()),
+            original_path=_to_relative_path(project_id, file_path),
             filesize=file_path.stat().st_size,
             is_pdf=is_pdf,
         )
@@ -128,7 +159,7 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
         existing.filesize = file_path.stat().st_size
         existing.uploaded_at = _now()
         existing.is_pdf = is_pdf
-        existing.original_path = str(file_path.resolve())
+        existing.original_path = _to_relative_path(project_id, file_path)
         # 重新尝试转码（覆盖原 PDF；如有 .pdfs 旧文件保留为历史）
         if not is_pdf:
             pdf_path = _try_convert_to_pdf(
@@ -148,7 +179,7 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
     f = File(
         item_id=target_item.id,
         filename=file_path.name,
-        original_path=str(file_path.resolve()),
+        original_path=_to_relative_path(project_id, file_path),
         filesize=file_path.stat().st_size,
         is_pdf=is_pdf,
         is_primary=len(target_item.files) == 0,  # 第一个文件自动 primary
@@ -173,8 +204,14 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
 
 def remove_path(db: Session, file_path: Path) -> None:
     """文件删除：同步从 files 表移除，可能回退 item 状态。"""
-    abs_path = str(file_path.resolve())
-    f = db.query(File).filter(File.original_path == abs_path).first()
+    # 修 B-03 + I-1：用 core 的 project_id_from_path（settings.PROJECTS_DIR 显式传）
+    project_id = project_id_from_path(file_path, settings.PROJECTS_DIR)
+    if project_id:
+        rel_path = _to_relative_path(project_id, file_path)
+    else:
+        # 兜底：完全在项目外（如 _unclaimed 跨项目）— 用原绝对路径
+        rel_path = str(file_path.resolve())
+    f = db.query(File).filter(File.original_path == rel_path).first()
     if not f:
         return
     item = db.query(Item).filter(Item.id == f.item_id).first() if f.item_id else None

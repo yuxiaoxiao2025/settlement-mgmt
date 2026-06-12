@@ -28,10 +28,11 @@ apiClient.interceptors.response.use(
 
       // 未登录或 session 过期 → 跳登录页（避免无限循环：登录页本身不走这个拦截器）
       if (status === 401 && !window.location.pathname.startsWith('/login')) {
-        // 简单粗暴：reload 到 /login。React Router 接管后会被 <Navigate /> 拦截
+        // 修 B-04：location.replace 同步跳登录，return 挂起 promise 不 reject
+        // 避免调用方 .catch() 把 'not authenticated' 弹成 toast（与跳转同时出现）
         const next = encodeURIComponent(window.location.pathname + window.location.search)
-        window.location.assign(`/login?next=${next}`)
-        return Promise.reject(new Error('not authenticated'))
+        window.location.replace(`/login?next=${next}`)
+        return new Promise(() => {})  // 永远不 resolve，调用方 .then() 链挂起
       }
 
       const detail = data?.detail ?? error.message ?? '请求失败'

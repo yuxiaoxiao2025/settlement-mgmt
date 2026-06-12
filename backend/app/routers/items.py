@@ -1,8 +1,10 @@
 """资料项路由。"""
+from pathlib import Path
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import Item, File
 from app.schemas import (
@@ -46,12 +48,13 @@ def _to_response(item: Item) -> ItemResponse:
 @router.get("/api/projects/{project_id}/items", response_model=ItemListResponse)
 def list_items(project_id: str, db: Session = Depends(get_db)):
     items = db.query(Item).filter(Item.project_id == project_id).order_by(Item.seq).all()
-    unclaimed = db.query(File).filter(File.item_id == "").all()
-    # 只取当前项目未认领的
-    unclaimed_in_project = [
-        u for u in unclaimed
-        if u.original_path and f"/projects/{project_id}/" in u.original_path.replace("\\", "/")
-    ]
+    # 修 I-4：用 item_id_orphan 列直接 SQL 过滤（不再走磁盘 — 修 TOCTOU 风险）
+    # item_id_orphan 在 T-06 之后由 ingest_path 写入时填充，存当前 project_id
+    unclaimed_in_project = (
+        db.query(File)
+        .filter(File.item_id == "", File.item_id_orphan == project_id)
+        .all()
+    )
     return ItemListResponse(
         project_id=project_id,
         items=[_to_response(i) for i in items],

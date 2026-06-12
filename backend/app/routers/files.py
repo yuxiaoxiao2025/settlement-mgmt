@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.paths import safe_join
+from app.core.paths import safe_join, resolve_file_path, project_id_from_path
 from app.core.template_loader import _sanitize_name
 from app.database import get_db
 from app.models import File, Item
@@ -16,6 +16,26 @@ from app.services import file_service
 from app.services.file_service import ingest_path
 
 router = APIRouter(tags=["files"])
+
+
+# 修 C-1 / C-2：从 File 记录解析运行时绝对路径的统一入口
+# 委托给 app.core.paths.resolve_file_path（shared by routers/files.py + services/settlement_builder.py）
+def _resolve_file_path(f: "File", prefer_pdf: bool = False) -> Path | None:
+    # review Round 6 D-4: orphan File 优先用 item_id_orphan (DB 存了真 project_id)
+    # 避免 project_id_from_path 对相对 basename 返 None → rglob 兜底
+    proj_id = (
+        f.item.project_id if f.item
+        else (f.item_id_orphan or project_id_from_path(Path(f.original_path), settings.PROJECTS_DIR))
+    )
+    return resolve_file_path(
+        f.original_path,
+        item_seq=f.item.seq if f.item else None,
+        item_name=f.item.name if f.item else None,
+        project_id=proj_id,
+        pdf_path=f.pdf_path,
+        prefer_pdf=prefer_pdf,
+    )
+
 
 # 上传大小上限：200MB / 文件（PDF 合并常见大文件；够用）
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
@@ -86,8 +106,8 @@ def preview_file(file_id: str, db: Session = Depends(get_db)):
     f = db.query(File).filter(File.id == file_id).first()
     if not f:
         raise HTTPException(404, "文件不存在")
-    p = Path(f.pdf_path or f.original_path)
-    if not p.exists():
+    p = _resolve_file_path(f, prefer_pdf=True)
+    if not p or not p.exists():
         raise HTTPException(404, "物理文件不存在")
     # content_disposition_type="inline" 让浏览器内置阅读器直接打开 PDF，而不是下载
     # 非 PDF 文件（docx/xlsx）回退为下载，因为浏览器无法 inline 渲染
@@ -110,8 +130,8 @@ def download_file(file_id: str, db: Session = Depends(get_db)):
     f = db.query(File).filter(File.id == file_id).first()
     if not f:
         raise HTTPException(404, "文件不存在")
-    p = Path(f.original_path)
-    if not p.exists():
+    p = _resolve_file_path(f)
+    if not p or not p.exists():
         raise HTTPException(404, "物理文件不存在")
     return FileResponse(str(p), filename=f.filename, content_disposition_type="attachment")
 
@@ -121,8 +141,9 @@ def delete_file(file_id: str, db: Session = Depends(get_db)):
     f = db.query(File).filter(File.id == file_id).first()
     if not f:
         raise HTTPException(404, "文件不存在")
-    p = Path(f.original_path)
-    file_service.remove_path(db, p)
+    p = _resolve_file_path(f)
+    if p is not None:
+        file_service.remove_path(db, p)
     # 物理文件不删，留给用户
     return None
 

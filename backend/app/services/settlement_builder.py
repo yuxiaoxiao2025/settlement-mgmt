@@ -14,7 +14,7 @@ from reportlab.lib.units import cm
 from pypdf import PdfReader, PdfWriter
 
 from app.config import settings
-from app.core.paths import safe_join
+from app.core.paths import safe_join, resolve_file_path, project_id_from_path
 from app.models import Project, Item, File, SettlementLog
 
 
@@ -283,8 +283,16 @@ def build_settlement(db: Session, project_id: str, requester_ip: str = "") -> Se
                 item_page_map.append((item, current_page))
                 continue
 
-            pdf_path = Path(primary.pdf_path or primary.original_path)
-            if not pdf_path.exists():
+            # 修 C-2：用统一路径解析（之前 Path(primary.original_path) 在 T-06 后是相对路径，.exists() 永远 False）
+            pdf_path = resolve_file_path(
+                primary.original_path,
+                item_seq=item.seq,
+                item_name=item.name,
+                project_id=item.project_id,
+                pdf_path=primary.pdf_path,
+                prefer_pdf=True,
+            )
+            if not pdf_path or not pdf_path.exists():
                 item_page_map.append((item, current_page))
                 continue
 

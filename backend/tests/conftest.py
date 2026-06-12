@@ -13,6 +13,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
 
 os.environ.setdefault("ACCESS_LOG", "false")
+# 修 B-01：4 个 auth secret 在 conftest 顶层注入默认 dev 值
+# CI / 本地可覆盖；部署时 .env 仍然优先（pydantic-settings 会用 .env 覆盖）
+os.environ.setdefault("ADMIN_USERNAME", "admin")
+os.environ.setdefault("ADMIN_PASSWORD", "admin123")
+os.environ.setdefault("SITE_VERIFICATION_CODE", "jrvUPovFZS8")
+os.environ.setdefault("JWT_SECRET", "test_secret_32bytes_xxxxxxxxxxxxx_padding")
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _REAL_TEMPLATE = _PROJECT_ROOT / "data" / "master_template.json"
@@ -84,6 +90,7 @@ def db(settings, test_engine):
 def client(settings, test_engine):
 	from app.database import get_db
 	from app.main import app
+	from app.config import settings as _s
 
 	TestSessionLocal = sessionmaker(
 		autocommit=False, autoflush=False, bind=test_engine
@@ -98,7 +105,20 @@ def client(settings, test_engine):
 
 	app.dependency_overrides[get_db] = override_get_db
 	try:
+		# 修 B-01：每个测试重置 slowapi limiter（避免上一个测试的登录计数影响下一个）
+		from app.routers.auth import limiter as _auth_limiter
+		_auth_limiter.reset()
 		with TestClient(app) as c:
+			# 修 B-01：业务 API 需鉴权（v0.3.1+），client fixture 启动时自动登录
+			# 把 token 注入 c.headers['Authorization']，业务测试无需各自处理
+			r = c.post("/api/auth/login", json={
+				"username": _s.ADMIN_USERNAME,
+				"password": _s.ADMIN_PASSWORD,
+				"verification_code": _s.SITE_VERIFICATION_CODE,
+			})
+			assert r.status_code == 200, f"login failed in fixture: {r.text}"
+			token = r.json()["access_token"]
+			c.headers["Authorization"] = f"Bearer {token}"
 			yield c
 	finally:
 		app.dependency_overrides.pop(get_db, None)

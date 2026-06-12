@@ -42,6 +42,24 @@ REM 4) 确保 data/ projects/ 目录存在（避免挂载空目录）
 if not exist "data" mkdir data
 if not exist "projects" mkdir projects
 
+REM 4.5) 修 B-02：检测 .env 缺失自动从 .env.example 复制
+if not exist ".env" (
+    if exist ".env.example" (
+        echo [INFO] .env 不存在，从 .env.example 复制（dev 默认值）
+        copy /Y .env.example .env >nul
+        if errorlevel 1 (
+            echo [ERROR] 复制 .env.example 失败
+            pause
+            exit /b 1
+        )
+        echo [OK] .env 已创建。生产部署请修改其中 4 个 secret。
+    ) else (
+        echo [ERROR] .env.example 不存在，无法 bootstrap
+        pause
+        exit /b 1
+    )
+)
+
 REM 5) 首次构建 + 启动；非首次只启动
 docker compose up -d --build
 if errorlevel 1 (
