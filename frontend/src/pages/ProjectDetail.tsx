@@ -11,19 +11,20 @@
  */
 import { Link, useParams } from 'react-router-dom';
 import { useState } from 'react';
-import { Archive } from 'lucide-react';
+import { Archive, Upload } from 'lucide-react';
 import { useProjectDeadline } from '../hooks/useDeadlineStatus';
 import {
- useConfirmItem,
- useItems,
- useRejectItem,
- useResetItem,
+  useConfirmItem,
+  useItems,
+  useRejectItem,
+  useResetItem,
 } from '../hooks/useItems';
 import { useArchiveProject, useProject } from '@/hooks/useProjects';
 import { ItemRow } from '../components/ItemRow';
 import { StatusBadge } from '../components/StatusBadge';
 import { UnclaimedFiles } from '../components/UnclaimedFiles';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { BatchUploadModal } from '../components/BatchUploadModal';
 import { useAppStore } from '@/store/app';
 import { formatDate } from '../lib/format';
 import type { Project } from '../types';
@@ -41,8 +42,10 @@ function ProjectDetail() {
  const resetMut = useResetItem(id);
  const archiveMut = useArchiveProject();
  const pushToast = useAppStore((s) => s.pushToast);
- const [showArchiveModal, setShowArchiveModal] = useState(false);
- const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  // 修公网部署：批量上传 modal
+  const [showBatchUpload, setShowBatchUpload] = useState(false);
 
  const isMutating =
  confirmMut.isPending || rejectMut.isPending || resetMut.isPending;
@@ -229,17 +232,30 @@ onConfirm={handleArchive}
 />
 )}
 
- {/* =============主体：25 行 ItemRow ============= */}
- <section>
- <div className="flex items-center justify-between mb-2">
- <h2 className="text-base font-semibold text-gray-800">
-资料清单（{items.length} / {totalCount}）
- </h2>
- {/*轮询状态指示（开发时方便肉眼确认） */}
- <span className="text-xs text-gray-400">
- {itemsQuery.isFetching ? '轮询中...' : '已同步'}
- </span>
- </div>
+  {/* =============主体：25 行 ItemRow ============= */}
+  <section>
+  <div className="flex items-center justify-between mb-2">
+  <h2 className="text-base font-semibold text-gray-800">
+  资料清单（{items.length} / {totalCount}）
+  </h2>
+  <div className="flex items-center gap-3">
+  {/* 修公网部署：批量上传按钮（一次性多文件到 _unclaimed） */}
+  <button
+  type="button"
+  onClick={() => setShowBatchUpload(true)}
+  disabled={isArchived}
+  className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1"
+  title={isArchived ? '归档项目不可上传' : '一次性上传多个文件到项目（_unclaimed 区）'}
+  >
+  <Upload className="h-3 w-3" />
+  批量上传
+  </button>
+  {/*轮询状态指示（开发时方便肉眼确认） */}
+  <span className="text-xs text-gray-400">
+  {itemsQuery.isFetching ? '轮询中...' : '已同步'}
+  </span>
+  </div>
+  </div>
 
  {items.length ===0 ? (
  <div className="text-sm text-gray-500 italic py-8 text-center border rounded">
@@ -270,12 +286,23 @@ onConfirm={handleArchive}
  )}
  </section>
 
- {/* ============= 未认领文件 ============= */}
- <UnclaimedFiles
- files={unclaimed}
- items={items}
- onChanged={() => itemsQuery.refetch()}
- />
+  {/* ============= 未认领文件 ============= */}
+  <UnclaimedFiles
+  files={unclaimed}
+  items={items}
+  onChanged={() => itemsQuery.refetch()}
+  />
+
+  {/* 修公网部署：批量上传 modal（按需挂载） */}
+  {showBatchUpload && (
+  <BatchUploadModal
+  projectId={id}
+  onClose={() => setShowBatchUpload(false)}
+  onUploaded={() => {
+  itemsQuery.refetch();
+  }}
+  />
+  )}
 
  {/*调试信息（开发时显示，生产可关） */}
  {import.meta.env.DEV && (
