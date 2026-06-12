@@ -106,3 +106,34 @@ def test_resolve_orphan_no_project_id_returns_none_if_not_in_any_project(tmp_pat
     # tmp_path 是空目录
     p = resolve_file_path("ghost.pdf", project_id=None, projects_root=tmp_path)
     assert p is None
+
+
+def test_resolve_orphan_basename_collision_returns_none(tmp_path, monkeypatch):
+    """修 D-2：多项目同 basename 冲突 → 返 None（不静默返错项目）。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "PROJECTS_DIR", tmp_path)
+    p1 = tmp_path / "p1"
+    p2 = tmp_path / "p2"
+    p1.mkdir()
+    p2.mkdir()
+    (p1 / "_unclaimed" / "dup.pdf").parent.mkdir(parents=True, exist_ok=True)
+    (p1 / "_unclaimed" / "dup.pdf").write_text("from p1")
+    (p2 / "_unclaimed" / "dup.pdf").parent.mkdir(parents=True, exist_ok=True)
+    (p2 / "_unclaimed" / "dup.pdf").write_text("from p2")
+    # 两个项目都有 dup.pdf → 冲突，返 None
+    p = resolve_file_path("dup.pdf", project_id=None, projects_root=tmp_path)
+    assert p is None
+
+
+def test_resolve_orphan_rglob_cap_protection(tmp_path, monkeypatch):
+    """修 D-1：rglob_cap 真正生效 — 超过 cap 的 match 集合返 None。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "PROJECTS_DIR", tmp_path)
+    # 创建 3 个项目，每个有同名文件
+    for i in range(3):
+        proj = tmp_path / f"p{i}"
+        proj.mkdir()
+        (proj / "ghost.pdf").write_text("x")
+    # 用 cap=2 测试 — 3 个 match 超过 cap
+    p = resolve_file_path("ghost.pdf", project_id=None, projects_root=tmp_path, rglob_cap=2)
+    assert p is None

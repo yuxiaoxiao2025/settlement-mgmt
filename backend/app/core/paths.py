@@ -156,10 +156,18 @@ def resolve_file_path(
     if not project_id and not p.is_absolute() and projects_root.exists():
         basename = Path(original_path).name
         if basename:
-            count = 0
-            for sub in projects_root.rglob(basename):
-                count += 1
-                if count > rglob_cap:
-                    return None
-                return sub
+            # review Round 3 D-1: cap 必须真正生效 — 第一次 match 不立即 return，
+            # 而是先 cap check，超过 cap 返 None（避免慢响应）
+            # review Round 3 D-2: 多项目同 basename 冲突时，返 None 让人工排查
+            # （D-2 长期方案是 File 表加 project_id 列，schema 改动）
+            matches = list(projects_root.rglob(basename))
+            if len(matches) > rglob_cap:
+                return None
+            if len(matches) == 0:
+                return None
+            if len(matches) > 1:
+                # 多项目同 basename 冲突，无法确定性路由 → 返 None
+                # 不返错路径，避免静默数据错误（review Round 3 D-2）
+                return None
+            return matches[0]
     return None
