@@ -446,3 +446,75 @@ def test_set_primary_file(client, settings, make_pdf):
     primaries = [f for f in body["files"] if f["is_primary"]]
     assert len(primaries) == 1
     assert primaries[0]["id"] == target
+
+
+# 修公网部署 (T-01): project 级批量上传到 _unclaimed
+import io
+
+
+def test_project_upload_to_unclaimed(client, sample_project):
+    """批量上传 2 个文件到项目 → unclaimed 段可见。"""
+    pid = sample_project["id"]
+    r = client.post(
+        f"/api/projects/{pid}/upload",
+        files=[
+            ("files", ("a.pdf", io.BytesIO(b"%PDF-1.4 fake\n%%EOF"), "application/pdf")),
+            ("files", ("b.txt", io.BytesIO(b"hello"), "text/plain")),
+        ],
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert len(data["uploaded"]) == 2
+    assert data["errors"] == []
+    # 验证 _unclaimed 段能查到这 2 个
+    r2 = client.get(f"/api/projects/{pid}/items")
+    unclaimed = r2.json()["unclaimed"]
+    names = {f["filename"] for f in unclaimed}
+    assert "a.pdf" in names
+    assert "b.txt" in names
+
+
+def test_project_upload_to_archived_returns_409(client, sample_project, db):
+    """归档项目不可上传。"""
+    from app.models import Project
+    from app.database import SessionLocal
+    s = SessionLocal()
+    try:
+        proj = s.query(Project).filter(Project.id == sample_project["id"]).first()
+        proj.status = "archived"
+        s.commit()
+    finally:
+        s.close()
+    r = client.post(
+        f"/api/projects/{sample_project['id']}/upload",
+        files=[("files", ("x.txt", io.BytesIO(b"x"), "text/plain"))],
+    )
+    assert r.status_code == 409
+
+
+def test_project_upload_nonexistent_returns_404(client):
+    """不存在的项目 → 404。"""
+    r = client.post(
+        "/api/projects/nonexistent-id-xxx/upload",
+        files=[("files", ("x.txt", io.BytesIO(b"x"), "text/plain"))],
+    )
+    assert r.status_code == 404
+
+
+def test_project_upload_error_isolation(client, sample_project):
+    """单文件失败不阻塞其他（错误隔离）。"""
+    pid = sample_project["id"]
+    r = client.post(
+        f"/api/projects/{pid}/upload",
+        files=[
+            ("files", ("good.txt", io.BytesIO(b"hello"), "text/plain")),
+            ("files", ("bad.exe", io.BytesIO(b"\x00"), "application/octet-stream")),  # 扩展名不允许
+        ],
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert len(data["uploaded"]) == 1
+    assert data["uploaded"][0]["filename"] == "good.txt"
+    assert len(data["errors"]) == 1
+    assert data["errors"][0]["filename"] == "bad.exe"
+    assert data["errors"][0]["status"] == 400

@@ -4,20 +4,24 @@
  *关键 SPEC：
  * - SPEC-UI-4：每行 MUST 显示序号 +名称 +状态徽章 + 文件数 + 操作按钮
  * -状态机（SPEC §2.1 + 本任务约束）：
- * pending → 无操作（等待文件上传）
+ * pending → 「上传」（公网部署必填）
  * uploaded → 「复核」「驳回」
- * rejected → 「重置」（允许重新上传）
+ * rejected → 「上传」「重置」
  * confirmed → 「重置」（管理员强制重置；SPEC-ST-5业务上不可回退，但 admin 可重置）
  *
  * 注意：
  * -驳回按钮 →弹出 prompt 输入 note
  * -复核按钮 → 直接调 API（后端自动选第一个 PDF 作为主文件）
  * -展开/收起状态在父级 ProjectDetail 不需要持久化（行级 useState即可）
+ * -上传按钮 → 点击展开 inline dropzone（复用 FileDropZone）
  */
 import { useState } from 'react';
+import { Upload, X } from 'lucide-react';
 import type { Item } from '../types';
 import { StatusBadge } from './StatusBadge';
 import { FileList } from './FileList';
+import FileDropZone from './FileDropZone';
+import { getItemActions } from '../lib/item-actions';
 
 interface ItemRowProps {
  item: Item;
@@ -37,25 +41,29 @@ export function ItemRow({
  onRefresh,
  disabled = false,
 }: ItemRowProps) {
- const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  // 修公网部署：行级上传按钮 → 展开 inline dropzone
+  const [showUpload, setShowUpload] = useState(false);
 
- function handleReject() {
- const note = window.prompt('请输入驳回备注（必填）：', '');
- if (note === null) return;
- const trimmed = note.trim();
- if (!trimmed) {
- window.alert('驳回备注不能为空');
- return;
- }
- onReject(item.id, trimmed);
- }
+  function handleReject() {
+  const note = window.prompt('请输入驳回备注（必填）：', '');
+  if (note === null) return;
+  const trimmed = note.trim();
+  if (!trimmed) {
+  window.alert('驳回备注不能为空');
+  return;
+  }
+  onReject(item.id, trimmed);
+  }
 
  function handleReset() {
  if (!window.confirm(`确认重置第 ${item.seq} 项「${item.name}」为待上传？`)) return;
  onReset(item.id);
  }
 
- const fileCount = item.files.length;
+  const fileCount = item.files.length;
+  // 修 T-06: 状态机决策抽到 helper，纯函数测覆盖
+  const actions = getItemActions(item.status);
 
  return (
  <div className="border-b border-gray-100 last:border-b-0">
@@ -108,49 +116,83 @@ export function ItemRow({
  {fileCount >0 ? `${fileCount} 文件` : '无文件'}
  </span>
 
- {/* 操作按钮组 ——按状态切换（SPEC §2.1 + CONTEXT-04约束） */}
- <div className="flex gap-1 flex-shrink-0 w-44 justify-end">
- {item.status === 'pending' && (
- <span className="text-xs text-gray-400 italic self-center">
-等待文件
- </span>
- )}
+  {/* 操作按钮组 ——按状态切换（SPEC §2.1 + CONTEXT-04约束） */}
+  <div className="flex gap-1 flex-shrink-0 w-44 justify-end">
+  {actions.showUpload && (
+  <>
+  <button
+  type="button"
+  onClick={() => setShowUpload((v) => !v)}
+  disabled={disabled}
+  className="px-2 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded disabled:opacity-50 inline-flex items-center gap-1"
+  title={item.status === 'rejected' ? '驳回后可重新上传文件' : '上传文件到该项'}
+  >
+  <Upload className="h-3 w-3" />
+  {showUpload ? '收起' : '上传'}
+  </button>
+  {showUpload && (
+  <button
+  type="button"
+  onClick={() => setShowUpload(false)}
+  className="px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded inline-flex items-center"
+  title="关闭上传区"
+  aria-label="关闭上传区"
+  >
+  <X className="h-3 w-3" />
+  </button>
+  )}
+  </>
+  )}
 
- {item.status === 'uploaded' && (
- <>
- <button
- type="button"
- onClick={() => onConfirm(item.id)}
- disabled={disabled || fileCount ===0}
- className="px-2 py-1 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
- title={fileCount ===0 ? '无文件可确认' : '标记为已确认'}
- >
-复核
- </button>
- <button
- type="button"
- onClick={handleReject}
- disabled={disabled}
- className="px-2 py-1 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded disabled:opacity-50"
- >
-驳回
- </button>
- </>
- )}
+  {actions.showConfirm && (
+  <button
+  type="button"
+  onClick={() => onConfirm(item.id)}
+  disabled={disabled || fileCount ===0}
+  className="px-2 py-1 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+  title={fileCount ===0 ? '无文件可确认' : '标记为已确认'}
+  >
+  复核
+  </button>
+  )}
 
- {(item.status === 'rejected' || item.status === 'confirmed') && (
- <button
- type="button"
- onClick={handleReset}
- disabled={disabled}
- className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded disabled:opacity-50"
- title="重置为待上传"
- >
- 重置
- </button>
- )}
- </div>
- </div>
+  {actions.showReject && (
+  <button
+  type="button"
+  onClick={handleReject}
+  disabled={disabled}
+  className="px-2 py-1 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded disabled:opacity-50"
+  >
+  驳回
+  </button>
+  )}
+
+  {actions.showReset && (
+  <button
+  type="button"
+  onClick={handleReset}
+  disabled={disabled}
+  className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded disabled:opacity-50"
+  title="重置为待上传"
+  >
+  重置
+  </button>
+  )}
+  </div>
+  </div>
+
+  {/* 修公网部署：行级上传区（pending/rejected 展开） */}
+  {showUpload && actions.showUpload && (
+  <div className="pb-3 pl-10">
+  <FileDropZone
+  itemId={item.id}
+  onUploaded={() => {
+  setShowUpload(false);
+  onRefresh();
+  }}
+  />
+  </div>
+  )}
 
  {/*展开后的文件列表 */}
  {expanded && (
