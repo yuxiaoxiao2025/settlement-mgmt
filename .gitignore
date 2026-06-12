@@ -84,3 +84,6 @@ mcp-error-*.log
 
 # Dogfood QA outputs (审查报告 + 截图)
 dogfood-output/
+
+# Git worktrees (不入仓，本地隔离开发用)
+.worktrees/
