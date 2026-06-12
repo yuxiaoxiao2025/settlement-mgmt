@@ -273,10 +273,8 @@ def me(current: Annotated[str, Depends(require_user)]):
 
 
 # ── 限速异常处理 ──
-async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    """429 with Retry-After header。"""
-    return HTTPException(
-        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        detail="too many login attempts, slow down",
-        headers={"Retry-After": str(exc.detail.split(" ")[-1] if hasattr(exc, "detail") else "60")},
-    )
+# 修 B-05：原 rate_limit_handler 是死代码 — `return HTTPException(...)` 不 raise，
+# 永远不生效。main.py 用 slowapi._rate_limit_exceeded_handler，本函数从未注册。
+# 已删除。如未来要自定义 429 响应，正确的写法是：
+#   @app.exception_handler(RateLimitExceeded)
+#   async def my_handler(...): raise HTTPException(429, ...)
