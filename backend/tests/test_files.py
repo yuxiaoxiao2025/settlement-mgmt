@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
+
 from app.models import Item, File
 from app.database import SessionLocal
 
@@ -518,3 +521,80 @@ def test_project_upload_error_isolation(client, sample_project):
     assert len(data["errors"]) == 1
     assert data["errors"][0]["filename"] == "bad.exe"
     assert data["errors"][0]["status"] == 400
+
+
+# 修 review Critical 1: _validate_upload 单元测（200MB 上限 + 文件名安全）
+def test_validate_upload_rejects_oversize():
+    """>200MB Content-Length → 413。"""
+    from app.routers.files import _validate_upload, MAX_UPLOAD_BYTES
+    with pytest.raises(HTTPException) as exc:
+        _validate_upload("big.pdf", content_length=MAX_UPLOAD_BYTES + 1)
+    assert exc.value.status_code == 413
+
+
+def test_validate_upload_allows_under_limit():
+    """≤200MB Content-Length → 不抛。"""
+    from app.routers.files import _validate_upload, MAX_UPLOAD_BYTES
+    _validate_upload("ok.pdf", content_length=MAX_UPLOAD_BYTES)  # 边界值
+    _validate_upload("ok.pdf", content_length=None)  # 没传 Content-Length (chunked)
+
+
+def test_validate_upload_rejects_path_traversal():
+    """文件名含 .. 或 / → 400 (修 review #19 边缘)。"""
+    from app.routers.files import _validate_upload
+    for bad in ["../etc/passwd", "..\\windows", "subdir/foo.pdf", "sub\\foo.pdf"]:
+        with pytest.raises(HTTPException) as exc:
+            _validate_upload(bad, content_length=100)
+        assert exc.value.status_code == 400, f"应拒绝: {bad}"
+
+
+def test_validate_upload_rejects_disallowed_ext():
+    """不在 _ALLOWED_EXTS 的扩展名 → 400。"""
+    from app.routers.files import _validate_upload
+    with pytest.raises(HTTPException) as exc:
+        _validate_upload("malware.exe", content_length=100)
+    assert exc.value.status_code == 400
+
+
+# 修 review Important 9: archived + 多文件隔离
+def test_project_upload_archived_blocks_entire_request(client, sample_project, db):
+    """归档项目即使传 1 好 1 坏 → 整个 409（不进入 per-file loop）。"""
+    from app.models import Project
+    from app.database import SessionLocal
+    s = SessionLocal()
+    try:
+        proj = s.query(Project).filter(Project.id == sample_project["id"]).first()
+        proj.status = "archived"
+        s.commit()
+    finally:
+        s.close()
+    r = client.post(
+        f"/api/projects/{sample_project['id']}/upload",
+        files=[
+            ("files", ("good.txt", io.BytesIO(b"x"), "text/plain")),
+            ("files", ("bad.exe", io.BytesIO(b"x"), "application/octet-stream")),
+        ],
+    )
+    assert r.status_code == 409
+    # 整个请求被拦, uploaded/errors 都不应出现
+    body = r.json()
+    # FastAPI 默认 422 错误格式
+    assert "detail" in body
+
+
+# 修 review Minor 20: 验证 is_pdf 字段
+def test_project_upload_returns_is_pdf_flag(client, sample_project):
+    """上传 .pdf 应当 is_pdf=True, 上传 .txt 应当 is_pdf=False。"""
+    pid = sample_project["id"]
+    r = client.post(
+        f"/api/projects/{pid}/upload",
+        files=[
+            ("files", ("a.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")),
+            ("files", ("b.txt", io.BytesIO(b"hello"), "text/plain")),
+        ],
+    )
+    assert r.status_code == 201
+    data = r.json()
+    by_name = {u["filename"]: u for u in data["uploaded"]}
+    assert by_name["a.pdf"]["is_pdf"] is True
+    assert by_name["b.txt"]["is_pdf"] is False

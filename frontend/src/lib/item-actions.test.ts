@@ -43,14 +43,11 @@ describe('getItemActions', () => {
     });
   });
 
-  it('未知状态: 兜底返全 false（安全）', () => {
+  it('未知状态: 抛错（exhaustiveness check, 编译期保证显式处理）', () => {
     const unknown = 'whatever' as ItemStatus;
-    expect(getItemActions(unknown)).toEqual({
-      showUpload: false,
-      showConfirm: false,
-      showReject: false,
-      showReset: false,
-    });
+    // 修 review Important 9: 未知状态不再"安全兜底返全 false",
+    // 而是抛错暴露代码缺陷 — 后端加新状态时前端必须显式处理
+    expect(() => getItemActions(unknown)).toThrow(/Unknown item status/);
   });
 
   it('所有合法状态: 互斥 + 不重复', () => {

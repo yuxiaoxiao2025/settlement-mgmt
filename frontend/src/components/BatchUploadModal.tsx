@@ -108,8 +108,22 @@ export function BatchUploadModal({ projectId, onClose, onUploaded }: Props) {
             )
           );
         }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : '网络错误';
+      } catch (e: unknown) {
+        // 修 review Important 6: 网络/后端错误本地化
+        // axios 错误 e.response.status 区分 400/413/409/500
+        const errObj = e as { response?: { status?: number; data?: { detail?: string } }; message?: string };
+        let msg = '网络错误，请重试';
+        if (errObj.response?.status) {
+          const s = errObj.response.status;
+          if (s === 400) msg = '文件类型不允许';
+          else if (s === 413) msg = '超过 200MB';
+          else if (s === 409) msg = '项目已归档，不可上传';
+          else if (s === 404) msg = '项目不存在';
+          else if (s >= 500) msg = '服务器错误';
+          else if (errObj.response.data?.detail) msg = errObj.response.data.detail;
+        } else if (errObj.message) {
+          msg = `网络错误：${errObj.message.slice(0, 50)}`;
+        }
         setItems((prev) =>
           prev.map((x) =>
             x.file === it.file ? { ...x, status: 'error', errorMsg: msg } : x

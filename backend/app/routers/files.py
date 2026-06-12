@@ -229,7 +229,8 @@ async def upload_to_project(
         raise HTTPException(409, "已归档项目不可上传")
 
     # 落地到 /projects/{project_id}/_unclaimed/
-    unclaimed_dir = settings.PROJECTS_DIR / project_id / "_unclaimed"
+    # 修 review I-19: 用 safe_join 防御性包一层 (project_id 来自 URL, 万一有 .. 会逃)
+    unclaimed_dir = safe_join(settings.PROJECTS_DIR, project_id, "_unclaimed")
     unclaimed_dir.mkdir(parents=True, exist_ok=True)
 
     uploaded: list[dict] = []

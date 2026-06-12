@@ -33,8 +33,10 @@ export function getItemActions(status: ItemStatus): ItemActions {
       return { showUpload: true, showConfirm: false, showReject: false, showReset: true };
     case 'confirmed':
       return { showUpload: false, showConfirm: false, showReject: false, showReset: true };
-    default:
-      // unknown status: 安全兜底 — 不显示任何按钮
-      return { showUpload: false, showConfirm: false, showReject: false, showReset: false };
+    default: {
+      // 修 review Important 9: exhaustiveness check — 编译期保证新状态必须显式处理
+      const _exhaustive: never = status;
+      throw new Error(`Unknown item status: ${String(_exhaustive)}`);
+    }
   }
 }
