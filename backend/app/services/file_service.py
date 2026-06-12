@@ -1,5 +1,5 @@
 """文件服务：路径归属判断、入库。"""
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Optional
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,20 @@ def _to_relative_path(project_id: str, file_path: Path) -> str:
         return "/".join(abs_parts[-len(proj_parts) + len(proj_parts):])
     # 实在不行只取 basename
     return abs_path.name
+
+
+# 修 B-03：从 file_path 推断 project_id（remove_path 不收 project_id 参数的兼容方案）
+def _project_id_from_path(file_path: Path) -> str | None:
+    """从 file_path 推断所属 project_id。
+
+    假设路径形如 .../projects/{proj_id}/... 或 E:\\...\\projects\\{proj_id}\\...
+    找不到就返回 None（caller 走绝对路径兜底）。
+    """
+    parts = PureWindowsPath(str(file_path)).parts
+    for i, p in enumerate(parts):
+        if p == "projects" and i + 1 < len(parts):
+            return parts[i + 1]
+    return None
 
 
 def _try_convert_to_pdf(
@@ -114,7 +128,7 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
         # 同名覆盖
         existing = (
             db.query(File)
-            .filter(File.original_path == str(file_path.resolve()))
+            .filter(File.original_path == _to_relative_path(project_id, file_path))
             .first()
         )
         is_pdf = file_path.suffix.lower() == ".pdf"
@@ -133,7 +147,7 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
         f = File(
             item_id="",  # orphan
             filename=file_path.name,
-            original_path=str(file_path.resolve()),
+            original_path=_to_relative_path(project_id, file_path),
             filesize=file_path.stat().st_size,
             is_pdf=is_pdf,
         )
@@ -157,7 +171,7 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
         existing.filesize = file_path.stat().st_size
         existing.uploaded_at = _now()
         existing.is_pdf = is_pdf
-        existing.original_path = str(file_path.resolve())
+        existing.original_path = _to_relative_path(project_id, file_path)
         # 重新尝试转码（覆盖原 PDF；如有 .pdfs 旧文件保留为历史）
         if not is_pdf:
             pdf_path = _try_convert_to_pdf(
@@ -177,7 +191,7 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
     f = File(
         item_id=target_item.id,
         filename=file_path.name,
-        original_path=str(file_path.resolve()),
+        original_path=_to_relative_path(project_id, file_path),
         filesize=file_path.stat().st_size,
         is_pdf=is_pdf,
         is_primary=len(target_item.files) == 0,  # 第一个文件自动 primary
@@ -202,8 +216,14 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
 
 def remove_path(db: Session, file_path: Path) -> None:
     """文件删除：同步从 files 表移除，可能回退 item 状态。"""
-    abs_path = str(file_path.resolve())
-    f = db.query(File).filter(File.original_path == abs_path).first()
+    # 修 B-03：推断 project_id 后存项目相对路径
+    project_id = _project_id_from_path(file_path)
+    if project_id:
+        rel_path = _to_relative_path(project_id, file_path)
+    else:
+        # 兜底：完全在项目外（如 _unclaimed 跨项目）— 用原绝对路径
+        rel_path = str(file_path.resolve())
+    f = db.query(File).filter(File.original_path == rel_path).first()
     if not f:
         return
     item = db.query(Item).filter(Item.id == f.item_id).first() if f.item_id else None
