@@ -1,8 +1,10 @@
 """资料项路由。"""
+from pathlib import Path
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import Item, File
 from app.schemas import (
@@ -47,10 +49,19 @@ def _to_response(item: Item) -> ItemResponse:
 def list_items(project_id: str, db: Session = Depends(get_db)):
     items = db.query(Item).filter(Item.project_id == project_id).order_by(Item.seq).all()
     unclaimed = db.query(File).filter(File.item_id == "").all()
-    # 只取当前项目未认领的
+    # 只取当前项目未认领的（修 B-03：项目相对路径不再含 /projects/{project_id} 前缀）
+    # 走磁盘反查：unclaimed 目录 + 项目根
+    proj_root = settings.PROJECTS_DIR / project_id
+    proj_unclaimed = proj_root / "_unclaimed" if (proj_root / "_unclaimed").exists() else None
     unclaimed_in_project = [
         u for u in unclaimed
-        if u.original_path and f"/projects/{project_id}/" in u.original_path.replace("\\", "/")
+        if u.original_path
+        and (
+            # 模式 1：直接放在项目根（orphans from ingest of file in project root）
+            (proj_root / u.original_path).exists()
+            # 模式 2：在 _unclaimed 子目录
+            or (proj_unclaimed and (proj_unclaimed / Path(u.original_path).name).exists())
+        )
     ]
     return ItemListResponse(
         project_id=project_id,

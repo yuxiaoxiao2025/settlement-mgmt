@@ -17,6 +17,65 @@ from app.services.file_service import ingest_path
 
 router = APIRouter(tags=["files"])
 
+
+# 修 B-03：统一路径解析（替代分散的 Path(f.original_path)）
+# 优先级：
+#   1) pdf_path 优先（合并 PDF）— 运行时绝对路径
+#   2) original_path 已经是绝对路径且存在 — 兼容历史数据
+#   3) original_path 当项目相对路径拼 — 标准形态
+#   4) 跨平台兜底（PureWindowsPath.basename + 全项目 rglob 一次）
+def _resolve_file_path(f: "File", prefer_pdf: bool = False) -> Path | None:
+    """解析 File 记录的运行时绝对路径。prefer_pdf=True 优先用 pdf_path。"""
+    if not f.item_id:
+        # orphan / _unclaimed：没 item 关系，original_path 是项目内相对或绝对
+        p = Path(f.pdf_path if prefer_pdf and f.pdf_path else f.original_path)
+        if p.is_absolute() and p.exists():
+            return p
+        return None
+
+    item = f.item
+    if not item:
+        return None
+    proj_id = item.project_id
+
+    # 1) prefer_pdf
+    if prefer_pdf and f.pdf_path:
+        p = Path(f.pdf_path)
+        if p.exists():
+            return p
+
+    # 2) original_path 是绝对且存在
+    p = Path(f.original_path)
+    if p.is_absolute() and p.exists():
+        return p
+
+    # 3) 项目相对路径
+    if not p.is_absolute():
+        candidates = [
+            settings.PROJECTS_DIR / proj_id / f"{item.seq:02d}_{_sanitize_name(item.name)}" / p.name,
+            settings.PROJECTS_DIR / proj_id / "_unclaimed" / p.name,
+            settings.PROJECTS_DIR / proj_id / str(f.original_path),  # 兼容子目录名异形
+        ]
+        for c in candidates:
+            if c.exists():
+                return c
+
+    # 4) 跨平台兜底
+    if p.is_absolute():
+        from pathlib import PureWindowsPath
+        basename = PureWindowsPath(f.original_path).name
+        if basename and proj_id:
+            folder = f"{item.seq:02d}_{_sanitize_name(item.name)}"
+            c = settings.PROJECTS_DIR / proj_id / folder / basename
+            if c.exists():
+                return c
+            proj_root = settings.PROJECTS_DIR / proj_id
+            if proj_root.exists():
+                for sub in proj_root.rglob(basename):
+                    return sub
+    return None
+
+
 # 上传大小上限：200MB / 文件（PDF 合并常见大文件；够用）
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
@@ -86,8 +145,8 @@ def preview_file(file_id: str, db: Session = Depends(get_db)):
     f = db.query(File).filter(File.id == file_id).first()
     if not f:
         raise HTTPException(404, "文件不存在")
-    p = Path(f.pdf_path or f.original_path)
-    if not p.exists():
+    p = _resolve_file_path(f, prefer_pdf=True)
+    if not p or not p.exists():
         raise HTTPException(404, "物理文件不存在")
     # content_disposition_type="inline" 让浏览器内置阅读器直接打开 PDF，而不是下载
     # 非 PDF 文件（docx/xlsx）回退为下载，因为浏览器无法 inline 渲染
@@ -110,8 +169,8 @@ def download_file(file_id: str, db: Session = Depends(get_db)):
     f = db.query(File).filter(File.id == file_id).first()
     if not f:
         raise HTTPException(404, "文件不存在")
-    p = Path(f.original_path)
-    if not p.exists():
+    p = _resolve_file_path(f)
+    if not p or not p.exists():
         raise HTTPException(404, "物理文件不存在")
     return FileResponse(str(p), filename=f.filename, content_disposition_type="attachment")
 
@@ -121,8 +180,9 @@ def delete_file(file_id: str, db: Session = Depends(get_db)):
     f = db.query(File).filter(File.id == file_id).first()
     if not f:
         raise HTTPException(404, "文件不存在")
-    p = Path(f.original_path)
-    file_service.remove_path(db, p)
+    p = _resolve_file_path(f)
+    if p is not None:
+        file_service.remove_path(db, p)
     # 物理文件不删，留给用户
     return None
 
