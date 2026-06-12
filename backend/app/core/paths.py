@@ -141,12 +141,12 @@ def resolve_file_path(
                     c = proj_root / folder / basename
                     if c.exists():
                         return c
-                count = 0
-                for sub in proj_root.rglob(basename):
-                    count += 1
-                    if count > rglob_cap:
-                        return None  # 太慢，放弃
-                    return sub
+                # review Round 4 C-1: 旧 rglob cap 死代码（D-1 同根问题）
+                # 改用 list(...) 收齐后判断：len > rglob_cap → None（cap 真生效）
+                matches = list(proj_root.rglob(basename))
+                if len(matches) > rglob_cap or len(matches) == 0:
+                    return None
+                return matches[0]
 
     # 3.5) Orphan 兜底（无 project_id 时）— 在所有项目根下找 basename
     # review C-1 Round 2: project_id_from_path 对纯 basename 返 None
