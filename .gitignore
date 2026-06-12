@@ -61,7 +61,7 @@ coverage/
 
 # 临时脚本 / 决策文件
 decision-*.json
-test_*.py
+/test_*.py
 scratch_*.py
 
 # 敏感 / 本地配置

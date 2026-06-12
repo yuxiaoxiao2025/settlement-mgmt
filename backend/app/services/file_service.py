@@ -11,6 +11,35 @@ from app.services.pdf_converter import convert_to_pdf
 from app.services.project_service import get_or_load_template_items
 
 
+# 修 B-03：DB 存项目相对路径（不是运行时绝对路径）
+# 跨平台移栽（Windows venv → Docker / 不同机器）不会失效
+def _to_relative_path(project_id: str, file_path: Path) -> str:
+    """把 file_path 转为项目内相对路径，存 DB 用。
+
+    跨平台兼容：
+    - Linux: /projects/{proj_id}/01_xxx/foo.pdf → "01_xxx/foo.pdf"
+    - Windows: E:\\...\\{proj_id}\\01_xxx\\foo.pdf → "01_xxx/foo.pdf"
+    - 已经在项目内（取相对）：保持原样
+    - 完全在项目外：兜底返回 basename
+    """
+    project_root = settings.PROJECTS_DIR / project_id
+    abs_path = file_path.resolve() if file_path.exists() else file_path
+    try:
+        rel = abs_path.relative_to(project_root)
+        # 统一用正斜杠（跨平台兼容 — Windows 上 relative_to 会返回反斜杠）
+        return str(rel).replace("\\", "/")
+    except ValueError:
+        pass
+    # 跨平台兜底：按 Windows 路径前缀切
+    from pathlib import PureWindowsPath
+    proj_parts = PureWindowsPath(str(project_root)).parts
+    abs_parts = PureWindowsPath(str(abs_path)).parts
+    if len(abs_parts) >= len(proj_parts) and abs_parts[-len(proj_parts):] == proj_parts:
+        return "/".join(abs_parts[-len(proj_parts) + len(proj_parts):])
+    # 实在不行只取 basename
+    return abs_path.name
+
+
 def _try_convert_to_pdf(
     project_id: str,
     item_seq: Optional[int],
