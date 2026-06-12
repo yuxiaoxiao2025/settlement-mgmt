@@ -97,3 +97,28 @@ def test_apply_modifies_only_belonging_files(in_memory_db):
         orphan = s.query(File).filter(File.filename == "orphan.pdf").first()
         # orphan 不动（仍绝对）
         assert orphan.original_path.endswith("orphan.pdf")
+
+
+def test_skip_already_relative_paths(in_memory_db, tmp_path, monkeypatch):
+    """修 C-3：已项目相对路径不处理（避免 _to_relative_path 兜底返 basename 丢子目录）。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "PROJECTS_DIR", tmp_path)
+
+    with in_memory_db() as s:
+        rel_file = File(
+            item_id="item-1",
+            filename="rel.pdf",
+            original_path="01_结算书/rel.pdf",  # 已相对
+            is_pdf=True,
+        )
+        s.add(rel_file)
+        s.commit()
+        rel_file_id = rel_file.id
+
+    # dry-run：跳过已相对路径
+    changed, total = migrate(dry_run=True)
+    # changed 仍是 0（之前 item-1/foo.pdf 已迁移过 + rel.pdf 跳过）
+    # 验证 rel_file 没被改
+    with in_memory_db() as s:
+        rf = s.query(File).filter(File.id == rel_file_id).first()
+        assert rf.original_path == "01_结算书/rel.pdf"  # 没动

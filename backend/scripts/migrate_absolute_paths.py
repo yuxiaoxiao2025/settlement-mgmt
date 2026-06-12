@@ -21,7 +21,8 @@ os.environ.setdefault("SITE_VERIFICATION_CODE", "jrvUPovFZS8")
 os.environ.setdefault("JWT_SECRET", "x" * 64)
 
 from app.config import settings  # noqa: E402
-from app.services.file_service import _to_relative_path, _project_id_from_path  # noqa: E402
+from app.services.file_service import _to_relative_path  # noqa: E402
+from app.core.paths import project_id_from_path  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models import File, Item  # noqa: E402
 
@@ -36,6 +37,10 @@ def migrate(dry_run: bool = True) -> tuple[int, int]:
             total += 1
             # 没 item_id 的 orphan 走绝对路径（不动）
             if not f.item_id:
+                continue
+            # 修 C-3：已项目相对路径不处理（T-06 写入的形态）— _to_relative_path 对已相对路径
+            # 会兜底返回 basename（丢子目录），保护策略：直接跳过
+            if not Path(f.original_path).is_absolute():
                 continue
             item = db.query(Item).filter(Item.id == f.item_id).first()
             if not item:
