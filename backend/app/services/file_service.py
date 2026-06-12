@@ -132,6 +132,8 @@ def ingest_path(db: Session, file_path: Path) -> Optional[File]:
             return existing
         f = File(
             item_id="",  # orphan
+            # 修 I-4: 用 item_id_orphan 列存 project_id（list_items 不再走磁盘）
+            item_id_orphan=project_id,
             filename=file_path.name,
             original_path=_to_relative_path(project_id, file_path),
             filesize=file_path.stat().st_size,

@@ -74,7 +74,8 @@ def in_memory_db(tmp_path, monkeypatch):
 def test_dry_run_does_not_modify(in_memory_db):
     """dry-run 应当不改库。"""
     changed, total = migrate(dry_run=True)
-    assert changed == 1
+    # 修 I-4：现在 migrate 也处理 orphan 补 project_id → changed=2
+    assert changed == 2
     assert total == 2  # 1 个有归属 + 1 个 orphan
     with in_memory_db() as s:
         f = s.query(File).filter(File.filename == "foo.pdf").first()
@@ -82,20 +83,23 @@ def test_dry_run_does_not_modify(in_memory_db):
         assert f.original_path.endswith("foo.pdf")
         assert Path(f.original_path).is_absolute()
         orphan = s.query(File).filter(File.filename == "orphan.pdf").first()
+        # 修 I-4：dry-run 也不改 DB
+        assert orphan.item_id_orphan is None or orphan.item_id_orphan == ""
         assert orphan.original_path.endswith("orphan.pdf")
 
 
 def test_apply_modifies_only_belonging_files(in_memory_db):
-    """--apply 改有归属的不动 orphan。"""
+    """--apply 改有归属 + 补 orphan project_id。"""
     changed, total = migrate(dry_run=False)
-    assert changed == 1
+    assert changed == 2  # 1 归属 + 1 orphan
     with in_memory_db() as s:
         f = s.query(File).filter(File.filename == "foo.pdf").first()
         # 改成了项目相对
         assert f.original_path == "01_结算书/foo.pdf"
         assert not Path(f.original_path).is_absolute()
         orphan = s.query(File).filter(File.filename == "orphan.pdf").first()
-        # orphan 不动（仍绝对）
+        # 修 I-4：orphan 补了 project_id，original_path 不动
+        assert orphan.item_id_orphan == "proj-migrate-1"
         assert orphan.original_path.endswith("orphan.pdf")
 
 

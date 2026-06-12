@@ -48,21 +48,13 @@ def _to_response(item: Item) -> ItemResponse:
 @router.get("/api/projects/{project_id}/items", response_model=ItemListResponse)
 def list_items(project_id: str, db: Session = Depends(get_db)):
     items = db.query(Item).filter(Item.project_id == project_id).order_by(Item.seq).all()
-    unclaimed = db.query(File).filter(File.item_id == "").all()
-    # 只取当前项目未认领的（修 B-03：项目相对路径不再含 /projects/{project_id} 前缀）
-    # 走磁盘反查：unclaimed 目录 + 项目根
-    proj_root = settings.PROJECTS_DIR / project_id
-    proj_unclaimed = proj_root / "_unclaimed" if (proj_root / "_unclaimed").exists() else None
-    unclaimed_in_project = [
-        u for u in unclaimed
-        if u.original_path
-        and (
-            # 模式 1：直接放在项目根（orphans from ingest of file in project root）
-            (proj_root / u.original_path).exists()
-            # 模式 2：在 _unclaimed 子目录
-            or (proj_unclaimed and (proj_unclaimed / Path(u.original_path).name).exists())
-        )
-    ]
+    # 修 I-4：用 item_id_orphan 列直接 SQL 过滤（不再走磁盘 — 修 TOCTOU 风险）
+    # item_id_orphan 在 T-06 之后由 ingest_path 写入时填充，存当前 project_id
+    unclaimed_in_project = (
+        db.query(File)
+        .filter(File.item_id == "", File.item_id_orphan == project_id)
+        .all()
+    )
     return ItemListResponse(
         project_id=project_id,
         items=[_to_response(i) for i in items],

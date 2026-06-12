@@ -22,6 +22,7 @@ os.environ.setdefault("JWT_SECRET", "x" * 64)
 
 from app.config import settings  # noqa: E402
 from app.services.file_service import _to_relative_path  # noqa: E402
+from app.core.paths import project_id_from_path  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models import File, Item  # noqa: E402
 
@@ -34,8 +35,23 @@ def migrate(dry_run: bool = True) -> tuple[int, int]:
         files = db.query(File).all()
         for f in files:
             total += 1
-            # 没 item_id 的 orphan 走绝对路径（不动）
+            # 没 item_id 的 orphan — 走原路径不动（or 修 I-4 补 project_id）
             if not f.item_id:
+                # 修 I-4：补 project_id 到 item_id_orphan 列（如果还没填）
+                if not f.item_id_orphan:
+                    # 推断：从 original_path 绝对路径或文件位置找
+                    if Path(f.original_path).is_absolute():
+                        proj_id = project_id_from_path(Path(f.original_path), settings.PROJECTS_DIR)
+                    else:
+                        # 已相对路径 — 不能可靠推断（reviewer Round 3 警告过）
+                        # 跳过，让用户手动归档
+                        continue
+                    if proj_id:
+                        if changed < 20:
+                            print(f"  {f.id[:8]} {f.filename[:30]} (orphan): → project_id={proj_id}")
+                        if not dry_run:
+                            f.item_id_orphan = proj_id
+                        changed += 1
                 continue
             # 修 C-3：已项目相对路径不处理（T-06 写入的形态）— _to_relative_path 对已相对路径
             # 会兜底返回 basename（丢子目录），保护策略：直接跳过
